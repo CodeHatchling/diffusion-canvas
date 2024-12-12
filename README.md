@@ -39,4 +39,6 @@ HOW TO USE:
 7. Use the [New] [Save] and [Load] buttons on the top left.
    - When saving, remember to use the correct extension for the file type (e.g. ".png")
 
-NOTE: If you use Diffusion Canvas while sd.webui is NOT frozen, some features (like LoRAs) will be deactivated.
+NOTES: 
+- If you use Diffusion Canvas while sd.webui is NOT frozen, some features (like LoRAs) will be deactivated.
+- Diffusion Canvas will use the LoRA settings provided by the most recent call to [GENERATE]. To change LoRAs, follow step 5.
