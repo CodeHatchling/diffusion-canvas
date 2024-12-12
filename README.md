@@ -7,6 +7,9 @@ HOW TO INSTALL:
    - Note: sd.webui version tested is 1.10.1
 2. Install the extension normally. Files should appear in "sd.webui\webui\extensions".
    - If necessary, simply download the contents into "sd.webui\webui\extensions\diffusion-canvas"
+3. Install this stuff into your python environment (I'd explain how, but pycharm does this for me):
+   - moderngl
+   - PyQt6
 
 HOW TO USE:
 
