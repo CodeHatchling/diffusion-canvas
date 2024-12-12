@@ -31,7 +31,7 @@ HOW TO USE:
      - The context size is rounded to a factor of 8 because latents are 8x8 pixels each.
    - Denoise Attenuation: The proportion of noise removed from the image for each denoise click. For example, 0.2 will remove 20% of the noise each time.
    - Denoise Subtraction: The absolute amount of noise subtracted. For example, if an image has a noise level of 0.5, a subtraction value of 0.1 will reduce it to 0.4.
-     - Both attenuation and subtraction occurs with each right "denoising brush stroke".
+     - Both attenuation and subtraction occurs with each denoising brush stroke.
      - The lower the attenuation and subtraction, the more steps it takes to resolve the image, and usually results in better image quality.
      - Recommended settings for quality: attenuation=0.05, subtraction=0.01
      - Recommended settings for rough draft: attenuation=0.5, subtraction=0.01
