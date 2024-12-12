@@ -45,3 +45,6 @@ HOW TO USE:
 NOTES: 
 - If you use Diffusion Canvas while sd.webui is NOT frozen, some features (like LoRAs) will be deactivated.
 - Diffusion Canvas will use the LoRA settings provided by the most recent call to [GENERATE]. To change LoRAs, follow step 5.
+
+CREDIT:
+- This software uses a procedure similar to the inpainting technique described in "Differential Diffusion".
