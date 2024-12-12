@@ -15,7 +15,7 @@ HOW TO USE:
 3. LEFT CLICK and drag anywhere on the canvas to add noise.
 4. Remove noise by...
    - Entering your prompt, LoRAs, CFG, etc. in sd.webui.
-   - Press [GENERATE]. sd.webui will get stuck, this is intended - at this point, sd.webui has passed the network and settings to diffusion canvas.
+   - Press [GENERATE]. sd.webui will get stuck, this is intended - at this point, sd.webui has passed the network and settings to Diffusion Canvas.
    - A button will appear in Diffusion Canvas' "Params Palette" dock. Click it to change to this prompt/setting at any time.
    - A "param" must be selected before you can denoise.
    - RIGHT CLICK and drag anywhere on the canvas to remove noise around the mouse cursor.
