@@ -14,7 +14,7 @@ HOW TO USE:
 2. Press [LAUNCH] button in extensions.
 3. LEFT CLICK and drag anywhere on the canvas to add noise.
 4. Remove noise by...
-   - Entering your prompt, loras, CFG, etc. in sd.webui.
+   - Entering your prompt, LoRAs, CFG, etc. in sd.webui.
    - Press [GENERATE]. sd.webui will get stuck, this is intended - at this point, sd.webui has passed the network and settings to diffusion canvas.
    - A button will appear in Diffusion Canvas' "Params Palette" dock. Click it to change to this prompt/setting at any time.
    - A "param" must be selected before you can denoise.
@@ -38,3 +38,5 @@ HOW TO USE:
      - Recommended settings for general work: attenuation=0.2, subtraction=0.01
 7. Use the [New] [Save] and [Load] buttons on the top left.
    - When saving, remember to use the correct extension for the file type (e.g. ".png")
+
+NOTE: If you use Diffusion Canvas while sd.webui is NOT frozen, some features (like LoRAs) will be deactivated.
