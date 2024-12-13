@@ -323,6 +323,12 @@ class DiffusionCanvasWindow(QMainWindow):
             (0.0, 1.0),
             0.001
         )
+        self.slider_denoise_bias = Slider(
+            "Denoise Bias",
+            0,
+            (-1, 1.0),
+            0.01
+        )
 
         sliders_layout.addRow(self.slider_noise_brush_radius.label, self.slider_noise_brush_radius.widget)
         sliders_layout.addRow(self.slider_noise_brush_intensity.label, self.slider_noise_brush_intensity.widget)
@@ -330,6 +336,7 @@ class DiffusionCanvasWindow(QMainWindow):
         sliders_layout.addRow(self.slider_denoise_size_y.label, self.slider_denoise_size_y.widget)
         sliders_layout.addRow(self.slider_denoise_attenuation.label, self.slider_denoise_attenuation.widget)
         sliders_layout.addRow(self.slider_denoise_subtraction.label, self.slider_denoise_subtraction.widget)
+        sliders_layout.addRow(self.slider_denoise_bias.label, self.slider_denoise_bias.widget)
 
         dock.setWidget(sliders_widget)
 
@@ -337,6 +344,10 @@ class DiffusionCanvasWindow(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(16)  # Roughly 60 FPS
+
+        # Add a timer to show full preview
+        self.full_preview_timer = 0
+        self.showing_quick_preview = False
 
         self.denoiser = None
         self.params = None
@@ -349,7 +360,7 @@ class DiffusionCanvasWindow(QMainWindow):
         self.history = History(self.api.create_empty_layer(512//8, 512//8))
         self.create_undo = True
 
-        self.update_canvas_view()
+        self.update_canvas_view(full=False)
 
     def _get_layer(self) -> Layer:
         return self.history.layer
@@ -379,6 +390,10 @@ class DiffusionCanvasWindow(QMainWindow):
         return self.slider_denoise_subtraction.value
     denoise_subtraction = property(_get_denoise_subtraction)
 
+    def _get_denoise_bias(self):
+        return self.slider_denoise_bias.value
+    denoise_bias = property(_get_denoise_bias)
+
     def on_clicked_new(self):
         """
         Opens a dialog with width/height entry fields, and [Create New] and [Cancel] buttons.
@@ -400,7 +415,7 @@ class DiffusionCanvasWindow(QMainWindow):
             self.create_undo = True
 
             # Update the display with the new blank canvas
-            self.update_canvas_view()
+            self.update_canvas_view(full=True)
             print(f"New canvas created with dimensions: {width}x{height}")
 
     def on_clicked_load(self):
@@ -419,7 +434,7 @@ class DiffusionCanvasWindow(QMainWindow):
             self.create_undo = True
 
             # Redraw the canvas
-            self.update_canvas_view()
+            self.update_canvas_view(full=True)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
 
@@ -434,7 +449,7 @@ class DiffusionCanvasWindow(QMainWindow):
 
         try:
             # Convert the latent space image back to a PIL image
-            image = self.api.latent_to_image(self.layer.clean_latent, PIL.Image.Image)
+            image = self.api.latent_to_image(self.layer.clean_latent, True, PIL.Image.Image)
 
             # Save the image to the chosen file path
             image.save(file_path)
@@ -496,6 +511,14 @@ class DiffusionCanvasWindow(QMainWindow):
             new_params = denoiser_and_params[1]
             self.add_params_to_palette(new_params)
 
+        self.full_preview_timer -= 16
+        if self.full_preview_timer <= 0:
+            self.full_preview_timer = 0
+            if self.showing_quick_preview:
+                self.update_canvas_view(full=True)
+
+
+
     def mousePressEvent(self, event):
         button = event.button()
         if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
@@ -541,7 +564,7 @@ class DiffusionCanvasWindow(QMainWindow):
                                     position_xy=normalized_position,
                                     pixel_radius=self.noise_brush_radius,
                                     noise_intensity=self.noise_brush_intensity)
-            self.update_canvas_view()
+            self.update_canvas_view(full=False)
 
         elif self.drag_button == Qt.MouseButton.RightButton:
             if self.create_undo:
@@ -555,8 +578,9 @@ class DiffusionCanvasWindow(QMainWindow):
                                           self.denoise_brush_size_y
                                       ),
                                       attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
-                                      time_budget=0.25)
-            self.update_canvas_view()
+                                      noise_bias=2 ** self.denoise_bias,
+                                      time_budget=0.1)
+            self.update_canvas_view(full=False)
 
     def keyPressEvent(self, event: QKeyEvent):
         """
@@ -579,24 +603,30 @@ class DiffusionCanvasWindow(QMainWindow):
         Undo the last action.
         """
         self.history.undo(1)
-        self.update_canvas_view()
+        self.update_canvas_view(full=False)
 
     def redo(self):
         """
         Redo the previously undone action.
         """
         self.history.redo(1)
-        self.update_canvas_view()
+        self.update_canvas_view(full=False)
 
-    def update_canvas_view(self):
+    def update_canvas_view(self, full: bool):
         latent_to_show = (
             self.layer.noisy_latent
             if self.last_button == Qt.MouseButton.LeftButton
             else self.layer.clean_latent
         )
 
+        if not full:
+            self.showing_quick_preview = True
+            self.full_preview_timer = 1000
+        else:
+            self.showing_quick_preview = False
+
         # Convert tensor to QImage
-        q_image = self.api.latent_to_image(latent_to_show, QImage)
+        q_image = self.api.latent_to_image(latent_to_show, full, QImage)
         pixmap = QPixmap.fromImage(q_image)
 
         # Update the label pixmap

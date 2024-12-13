@@ -76,10 +76,11 @@ class Layer:
 
     @torch.no_grad()
     def step(self,
-         denoise: Callable[[torch.Tensor, float], torch.Tensor],
-         attenuation_func: Callable[[float], float],
-         brush_mask: torch.Tensor | None = None,
-         y_bounds: tuple[int, int] = (0, -1), x_bounds: tuple[int, int] = (0, -1)):
+             denoise: Callable[[torch.Tensor, float], torch.Tensor],
+             attenuation_func: Callable[[float], float],
+             brush_mask: torch.Tensor | None = None,
+             noise_bias: float = 1,
+             y_bounds: tuple[int, int] = (0, -1), x_bounds: tuple[int, int] = (0, -1)):
 
         # Convert these tensors into "windowed" versions according to the bounds.
         if isinstance(brush_mask, torch.Tensor):
@@ -104,7 +105,7 @@ class Layer:
         ).squeeze().item()
 
         # Denoise!
-        denoised_latent = denoise(uniform_noisy_latent, max_amplitude)
+        denoised_latent = denoise(uniform_noisy_latent, max_amplitude * noise_bias)
 
         # Use the attenuation function to calculate our next maximum noise level.
         attenuated_max_amplitude: float = attenuation_func(max_masked_amplitude)

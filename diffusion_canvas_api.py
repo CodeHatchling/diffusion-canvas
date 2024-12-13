@@ -99,8 +99,8 @@ class DiffusionCanvasAPI:
         )
 
     @staticmethod
-    def latent_to_image(latent: torch.Tensor, dest_type):
-        decoded = decode_image(latent)
+    def latent_to_image(latent: torch.Tensor, full_quality: bool, dest_type):
+        decoded = decode_image(latent, full_quality)
         converted = conv.convert(decoded, dest_type)
         return converted
 
@@ -137,6 +137,7 @@ class DiffusionCanvasAPI:
                          position_xy: tuple[float, float],
                          context_region_pixel_size_xy: tuple[int, int],
                          attenuation_params: tuple[float, float],
+                         noise_bias: float,
                          time_budget: float = 0.25):
 
         if self._denoiser is None:
@@ -174,5 +175,6 @@ class DiffusionCanvasAPI:
                        lambda x: np.maximum(x * (1.0 - attenuation_params[0])
                                             - attenuation_params[1], 0),
                        brush_mask=None,  # mask,
+                       noise_bias=noise_bias,
                        y_bounds=y_bounds,
                        x_bounds=x_bounds)

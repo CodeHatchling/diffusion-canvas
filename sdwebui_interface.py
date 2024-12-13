@@ -12,7 +12,7 @@
 # diffusion_canvas_api.py - Contains functions used by the UI
 
 import modules.processing as processing
-from modules.sd_samplers_common import images_tensor_to_samples, approximation_indexes, InterruptedException
+from modules.sd_samplers_common import images_tensor_to_samples, samples_to_images_tensor, approximation_indexes, InterruptedException
 from modules.shared import opts
 from modules import devices
 import modules.shared as shared
@@ -41,9 +41,13 @@ has_intercepted_values: bool = False
 
 
 @torch.no_grad()
-def decode_image(latent):
-    image = processing.decode_latent_batch(shared.sd_model, latent)
-    image = torch.stack(image).float()
+def decode_image(latent, full_quality: bool = True):
+    if full_quality:
+        image = processing.decode_latent_batch(shared.sd_model, latent)
+        image = torch.stack(image).float()
+    else:
+        image = samples_to_images_tensor(latent, approximation_indexes.get(opts.show_progress_type, 0))
+
     return torch.clamp((image + 1.0) / 2.0, min=0.0, max=1.0)
 
 
@@ -51,8 +55,7 @@ def decode_image(latent):
 def encode_image(image):
     image = torch.clamp(image, min=0.0, max=1.0)
     image = image.to(shared.device, dtype=devices.dtype_vae)
-    return images_tensor_to_samples(image, approximation_indexes.get(opts.sd_vae_encode_method),
-                                    shared.sd_model)
+    return images_tensor_to_samples(image, approximation=0)  # Full
 
 
 @torch.no_grad()
