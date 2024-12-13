@@ -14,7 +14,7 @@
 from PyQt6.QtWidgets import (QLabel, QMainWindow, QVBoxLayout, QWidget, QSlider, QDockWidget,
                              QFormLayout, QLineEdit, QPushButton, QScrollArea, QHBoxLayout,
                              QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QGridLayout, QSpinBox)
-from PyQt6.QtGui import QPixmap, QImage, QMouseEvent
+from PyQt6.QtGui import QPixmap, QImage, QMouseEvent, QKeyEvent
 from PyQt6.QtCore import Qt, QTimer, QRect, QPointF
 import PIL.Image
 import math
@@ -23,6 +23,7 @@ import torch
 from PIL import Image
 from sdwebui_interface import pop_intercepted, unfreeze_sd_webui
 from diffusion_canvas_api import DiffusionCanvasAPI
+from layer import History, Layer
 
 
 class RenameDialog(QDialog):
@@ -80,7 +81,7 @@ class Slider:
 
         # Create the slider.
         self._slider = QSlider(Qt.Orientation.Horizontal)
-        self._slider.setMinimumWidth(200)
+        self._slider.setMinimumWidth(100)
         self._slider.setMinimum(0)
         self._slider.setMaximum(self._steps)
         self._slider.setValue(self._value_to_step(self._value))
@@ -177,7 +178,10 @@ class NewCanvasDialog(QDialog):
         self.layout.addWidget(self.height_input, 1, 1)
 
         # Buttons
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            self
+        )
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.layout.addWidget(self.buttons, 2, 0, 1, 2)
@@ -320,9 +324,14 @@ class DiffusionCanvasWindow(QMainWindow):
         self.drag_button = None
         self.last_button = None
 
-        # Update the canvas view
-        self.layer = self.api.create_empty_layer(512//8, 512//8)
+        self.history = History(self.api.create_empty_layer(512//8, 512//8))
+        self.create_undo = True
+
         self.update_canvas_view()
+
+    def _get_layer(self) -> Layer:
+        return self.history.layer
+    layer = property(fget=_get_layer)
 
     def _get_noise_brush_radius(self):
         return self.slider_noise_brush_radius.value
@@ -365,7 +374,8 @@ class DiffusionCanvasWindow(QMainWindow):
             )
 
             # Create a new latent layer with the specified dimensions
-            self.layer = self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1])
+            self.history = History(self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1]))
+            self.create_undo = True
 
             # Update the display with the new blank canvas
             self.update_canvas_view()
@@ -383,7 +393,8 @@ class DiffusionCanvasWindow(QMainWindow):
         try:
             # Load the image and convert to a diffusion canvas layer
             image = Image.open(file_path)
-            self.layer = self.api.create_layer_from_image(image)
+            self.history = History(self.api.create_layer_from_image(image))
+            self.create_undo = True
 
             # Redraw the canvas
             self.update_canvas_view()
@@ -480,6 +491,8 @@ class DiffusionCanvasWindow(QMainWindow):
             self.is_dragging = False
             self.drag_button = None
 
+        self.create_undo = True
+
     @torch.no_grad()
     def apply_brush(self, event: QMouseEvent):
         pixmap: QPixmap = self.label.pixmap()
@@ -499,12 +512,19 @@ class DiffusionCanvasWindow(QMainWindow):
             return
 
         if self.drag_button == Qt.MouseButton.LeftButton:
+            if self.create_undo:
+                self.history.register_undo()
+                self.create_undo = False
             self.api.draw_noise_dab(layer=self.layer,
                                     position_xy=normalized_position,
                                     pixel_radius=self.noise_brush_radius,
                                     noise_intensity=self.noise_brush_intensity)
+            self.update_canvas_view()
 
         elif self.drag_button == Qt.MouseButton.RightButton:
+            if self.create_undo:
+                self.history.register_undo()
+                self.create_undo = False
             self.api.draw_denoise_dab(layer=self.layer,
                                       params=self.params,
                                       position_xy=normalized_position,
@@ -514,7 +534,36 @@ class DiffusionCanvasWindow(QMainWindow):
                                       ),
                                       attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
                                       time_budget=0.25)
+            self.update_canvas_view()
 
+    def keyPressEvent(self, event: QKeyEvent):
+        """
+        Handles key press events to listen for Ctrl+Z and Ctrl+Shift+Z for undo and redo.
+        """
+        used = False
+        if event.key() == Qt.Key.Key_Z:
+            if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                self.undo()  # Ctrl+Z
+                used = True
+            elif event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+                self.redo()  # Ctrl+Shift+Z
+                used = True
+
+        if not used:
+            super().keyPressEvent(event)
+
+    def undo(self):
+        """
+        Undo the last action.
+        """
+        self.history.undo(1)
+        self.update_canvas_view()
+
+    def redo(self):
+        """
+        Redo the previously undone action.
+        """
+        self.history.redo(1)
         self.update_canvas_view()
 
     def update_canvas_view(self):

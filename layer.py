@@ -150,3 +150,42 @@ class Layer:
     @torch.no_grad()
     def clone(self):
         return Layer(self.clean_latent.clone(), self.noisy_latent.clone(), self.noise_amplitude.clone())
+
+
+class History:
+    def __init__(self, init_layer: Layer):
+        self._undo_index: int = 0
+        self._undo_stack: list[Layer] = [init_layer]
+
+    def _get_layer(self) -> Layer:
+        return self._undo_stack[self._undo_index]
+
+    layer = property(fget=_get_layer)
+
+    def register_undo(self):
+        current_layer = self._undo_stack[self._undo_index]
+
+        # Remove the current layer from the stack, and all "redo" steps ahead of it.
+        self._undo_stack = self._undo_stack[0:self._undo_index]
+
+        # Add a clone of the current state we can switch back to, AND the active state.
+        self._undo_stack += [current_layer.clone(), current_layer]
+
+        self._undo_index = len(self._undo_stack) - 1
+
+    def _clamp_undo_index(self, index: int):
+        return np.maximum(
+            0,
+            np.minimum(
+                len(self._undo_stack) - 1,
+                index
+            )
+        )
+
+    def undo(self, steps: int = 1):
+        self._undo_index = self._clamp_undo_index(self._undo_index - steps)
+
+    def redo(self, steps: int = 1):
+        self._undo_index = self._clamp_undo_index(self._undo_index + steps)
+
+
