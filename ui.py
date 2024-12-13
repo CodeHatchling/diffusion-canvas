@@ -517,8 +517,6 @@ class DiffusionCanvasWindow(QMainWindow):
             if self.showing_quick_preview:
                 self.update_canvas_view(full=True)
 
-
-
     def mousePressEvent(self, event):
         button = event.button()
         if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
