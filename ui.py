@@ -202,11 +202,33 @@ class DiffusionCanvasWindow(QMainWindow):
         self.label = QLabel(self)
 
         # Central layout setup
-        central_widget = QWidget()
-        layout = QVBoxLayout(central_widget)
+        self.canvas_widget = QWidget()
+        canvas_layout = QVBoxLayout(self.canvas_widget)
+        canvas_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.canvas_widget.setLayout(canvas_layout)
+
+        canvas_scroll_area = QScrollArea()
+        canvas_scroll_area.setWidget(self.canvas_widget)
+        canvas_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        canvas_scroll_area.setMinimumWidth(200)
+        canvas_scroll_area.setMinimumHeight(200)
+
+        canvas_layout.addWidget(self.label)
+
+        self.setCentralWidget(canvas_scroll_area)
+
+        '''central_widget = QWidget()
+        canvas_scroll_area = QScrollArea(central_widget)
+        layout = QVBoxLayout(canvas_scroll_area)
+
         layout.addWidget(self.label)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(central_widget)
+
+        canvas_scroll_area.setWidget(layout)
+        canvas_scroll_area.setMinimumWidth(200)
+        canvas_scroll_area.setMinimumHeight(200)
+
+        self.setCentralWidget(central_widget)'''
 
         # Add an unfreeze button to return control to sd.webui
         menu_widget = QWidget()
@@ -582,3 +604,5 @@ class DiffusionCanvasWindow(QMainWindow):
         self.label.setFixedWidth(pixmap.width())
         self.label.setFixedHeight(pixmap.height())
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.canvas_widget.setFixedWidth(pixmap.width() + 20)
+        self.canvas_widget.setFixedHeight(pixmap.height() + 20)
