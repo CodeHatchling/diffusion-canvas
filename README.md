@@ -39,6 +39,15 @@ HOW TO USE:
      - Recommended settings for quality: attenuation=0.05, subtraction=0.01
      - Recommended settings for rough draft: attenuation=0.5, subtraction=0.01
      - Recommended settings for general work: attenuation=0.2, subtraction=0.01
+   - Denoise Bias: Controls how aggressive or passive the denoiser should be. Similar in concept to "temperature" for LLMs.
+     - Negative values: Remove less noise. This will tend to add more detail to the image, but can harm coherence and clarity.
+     - Positive values: Remove more noise. This will make the image smoother and more coherent, but tends to produce blurrier images.
+     - Usage tips:
+       - For areas that need more detail, selectively denoise with a slight negative bias.
+       - For areas that lack clarity, use a slight positive bias.
+       - By changing the bias at different points in the denoising process, you can add/remove detail/coherence at different "scales".
+       - If you use a positive bias at higher noise levels, large scale structure may be more coherent.
+       - If you use a negative bias at low noise levels, more fine detail may be added.
 7. Use the [New] [Save] and [Load] buttons on the top left.
    - When saving, if you do not enter an extension (e.g. ".png") it will save it as a PNG file.
 
