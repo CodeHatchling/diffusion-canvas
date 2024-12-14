@@ -40,7 +40,7 @@ HOW TO USE:
      - Recommended settings for rough draft: attenuation=0.5, subtraction=0.01
      - Recommended settings for general work: attenuation=0.2, subtraction=0.01
 7. Use the [New] [Save] and [Load] buttons on the top left.
-   - When saving, remember to use the correct extension for the file type (e.g. ".png")
+   - When saving, if you do not enter an extension (e.g. ".png") it will save it as a PNG file.
 
 NOTES: 
 - If you use Diffusion Canvas while sd.webui is NOT frozen, some features (like LoRAs) will be deactivated.
