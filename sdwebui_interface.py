@@ -59,7 +59,7 @@ def encode_image(image):
 
 
 @torch.no_grad()
-def denoise(denoiser, latent, sigma, params):
+def denoise(denoiser: any, latent: torch.Tensor, sigma: float, params: any) -> torch.Tensor:
     with Timer("denoise"):
         if denoiser is None:
             return latent
