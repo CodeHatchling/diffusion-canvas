@@ -128,7 +128,6 @@ class DiffusionCanvasAPI:
 
         return decode_image(latent, full_quality=True)
 
-
     @torch.no_grad()
     def draw_noise_dab(self,
                        layer: Layer, 
