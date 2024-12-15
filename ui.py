@@ -24,27 +24,212 @@ from PIL import Image
 from sdwebui_interface import pop_intercepted, unfreeze_sd_webui
 from diffusion_canvas_api import DiffusionCanvasAPI
 from layer import History, Layer
+from typing import Callable
 
 
-class RenameDialog(QDialog):
-    def __init__(self, parent=None, current_name=""):
+global_generate_image: Callable[[int, int, int, any], QImage] | None = None
+
+
+class ExceptionCatcher:
+    def __init__(self, context: QWidget | None, message: str):
+        self.context = context
+        self.message = message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            QMessageBox.critical(self.context, f"Error: {exc_type}", f"{self.message}: {exc_value}")
+        return True  # Suppress exceptions
+
+
+class EditParamsDialog(QDialog):
+    class Output:
+        def __init__(self, name: str, pixmap: QImage | None):
+            self.name: str = name
+            self.pixmap: QPixmap | None = pixmap
+
+    def __init__(self, current_widget: "ParamsWidget", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Rename Params")
+        self.setWindowTitle("Edit Params")
 
-        self.layout = QVBoxLayout(self)
+        self.delete = False
 
+        self.layout = QFormLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Add a name text field.
         self.name_input = QLineEdit(self)
-        self.name_input.setText(current_name)
-        self.layout.addWidget(self.name_input)
+        self.name_input.setText(current_widget.name)
+        self.layout.addRow("Name", self.name_input)
 
+        # Add a thumbnail preview.
+        self.image = QLabel(self)
+        self.image.setFixedWidth(200)
+        self.image.setFixedHeight(200)
+        self.image.setScaledContents(True)
+        self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if isinstance(current_widget.pixmap, QPixmap):
+            self.image.setPixmap(current_widget.pixmap)
+        else:
+            self.image.setText("No Thumbnail")
+        self.layout.addRow("Thumbnail", self.image)
+
+        # Add a generate button.
+        self.generate_button = QPushButton("Generate Thumbnail")
+        self.generate_button.clicked.connect(lambda: self.generate_thumbnail(current_widget.params))
+        self.layout.addWidget(self.generate_button)
+
+        # Add Okay/Cancel buttons.
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         self.layout.addWidget(self.buttons)
 
-    def get_name(self):
-        return self.name_input.text()
+    def generate_thumbnail(self, params):
+        if global_generate_image is None:
+            return
+
+        if params is None:
+            return
+
+        import texture_convert as conv
+        image = conv.convert(global_generate_image(512, 512, 20, params), QImage)
+        image = QPixmap.fromImage(image)
+        self.image.setPixmap(image)
+
+    def get_output(self) -> Output:
+        return EditParamsDialog.Output(
+            name=self.name_input.text(),
+            pixmap=self.image.pixmap(),
+        )
+
+
+class ParamsWidget(QWidget):
+
+    params: any
+    delete_handler: Callable[['ParamsWidget'], None]
+    button_image: QLabel
+    button_label: QLabel
+
+    def __init__(self,
+                 params: any,
+                 button_name: str,
+                 params_setter: Callable[[any], None],
+                 delete_handler: Callable[['ParamsWidget'], None],
+                 parent: QWidget | None = None,):
+        super().__init__(parent)
+        self.params = params
+        self.delete_handler = delete_handler
+
+        # Create a layout for the button and rename action
+        main_layout = QHBoxLayout()
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        def add_button() -> QWidget:
+            # Params selection button
+            button = QPushButton(self)
+            button.clicked.connect(lambda: params_setter(self.params))
+            button.setFixedWidth(100)
+            button.setFixedHeight(120)
+
+            # Internal button layout
+            button_internal_layout = QVBoxLayout(button)
+            button.setLayout(button_internal_layout)
+            button_internal_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            self.button_image = QLabel()
+            self.button_image.setFixedWidth(80)
+            self.button_image.setFixedHeight(80)
+            self.button_image.setScaledContents(True)
+            self.button_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            button_internal_layout.addWidget(self.button_image)
+
+            self.button_label = QLabel()
+            self.button_label.setText(button_name)
+            self.button_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            button_internal_layout.addWidget(self.button_label)
+
+            return button
+
+        def add_side_buttons() -> QWidget:
+            # Must be a widget.
+            holder = QWidget(self)
+
+            # Vertical layout for rename and delete buttons
+            small_button_layout = QVBoxLayout()
+            small_button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            # Edit button
+            rename_button = QPushButton("📝", self)
+            rename_button.setFixedWidth(30)
+            rename_button.setFixedHeight(30)
+            rename_button.clicked.connect(self.on_rename_params)
+            small_button_layout.addWidget(rename_button)
+
+            # Delete button
+            delete_button = QPushButton("❌", self)
+            delete_button.setFixedWidth(30)
+            delete_button.setFixedHeight(30)
+            delete_button.clicked.connect(self.on_delete)
+            small_button_layout.addWidget(delete_button)
+
+            holder.setLayout(small_button_layout)
+            return holder
+
+        main_layout.addWidget(add_button())
+        main_layout.addWidget(add_side_buttons())
+
+        # Add to layout
+        self.setLayout(main_layout)
+
+    def on_rename_params(self):
+        """
+        Opens a dialog to rename a params button.
+        """
+        dialog = EditParamsDialog(current_widget=self, parent=None)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            output = dialog.get_output()
+            self.button_image.setPixmap(output.pixmap)
+            self.button_label.setText(output.name)
+
+    def on_delete(self):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Delete Params")  # Set the title
+        dialog.setText(f"Do you want to delete the \"{self.name}\" params?")  # Set the main message
+        dialog.setInformativeText("Press \"Delete\" to delete them, press \"Cancel\" to keep them.\n"
+                                  "This cannot be undone.")  # Optional detailed message
+        dialog.setIcon(QMessageBox.Icon.Warning)  # Set an icon (e.g., Question, Information, Warning, Critical)
+
+        # Add custom buttons
+        accept_button = dialog.addButton("Delete", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+
+        # Execute the dialog
+        dialog.exec()
+
+        # Determine which button was clicked
+        if dialog.clickedButton() == accept_button:
+            self.delete_handler(self)
+
+    def _get_name(self) -> str:
+        return self.button_label.text()
+
+    def _set_name(self, value: str):
+        self.button_label.setText(value)
+
+    name = property(fget = _get_name, fset = _set_name)
+
+    def _get_pixmap(self) -> QPixmap:
+        return self.button_image.pixmap()
+
+    def _set_pixmap(self, value: QPixmap):
+        self.button_image.setPixmap(value)
+
+    pixmap = property(fget = _get_pixmap, fset = _set_pixmap)
 
 
 class Slider:
@@ -194,10 +379,16 @@ class DiffusionCanvasWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Diffusion Canvas")
+
         self.api = DiffusionCanvasAPI()
+
+        # Set up the generator function used by other stuff.
+        global global_generate_image
+        global_generate_image = self.api.generate_image
+
         self.setUpdatesEnabled(True)
-        self.params_palette = []  # List to store params objects
-        self.params_buttons = []  # List to store buttons associated with params
+
+        self.params_widgets: list[ParamsWidget] = []  # List to store params widgets
 
         self.label = QLabel(self)
 
@@ -216,19 +407,6 @@ class DiffusionCanvasWindow(QMainWindow):
         canvas_layout.addWidget(self.label)
 
         self.setCentralWidget(canvas_scroll_area)
-
-        '''central_widget = QWidget()
-        canvas_scroll_area = QScrollArea(central_widget)
-        layout = QVBoxLayout(canvas_scroll_area)
-
-        layout.addWidget(self.label)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        canvas_scroll_area.setWidget(layout)
-        canvas_scroll_area.setMinimumWidth(200)
-        canvas_scroll_area.setMinimumHeight(200)
-
-        self.setCentralWidget(central_widget)'''
 
         # Add an unfreeze button to return control to sd.webui
         menu_widget = QWidget()
@@ -349,7 +527,6 @@ class DiffusionCanvasWindow(QMainWindow):
         self.full_preview_timer = 0
         self.showing_quick_preview = False
 
-        self.denoiser = None
         self.params = None
 
         # Track mouse dragging
@@ -361,6 +538,32 @@ class DiffusionCanvasWindow(QMainWindow):
         self.create_undo = True
 
         self.update_canvas_view(full=False)
+
+    def closeEvent(self, event):
+        """
+        Override this method to handle tasks before the window closes.
+        """
+        reply = QMessageBox.question(
+            self,
+            "Confirm Exit",
+            "Are you sure you want to exit?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Perform cleanup tasks here
+            print("Closing the application...")
+
+            # Clean up memory and such.
+            self.release()
+
+            event.accept()  # Accept the close event
+        else:
+            event.ignore()  # Ignore the close event
+
+    def release(self):
+        global global_generate_image
+        global_generate_image = None
 
     def _get_layer(self) -> Layer:
         return self.history.layer
@@ -399,35 +602,36 @@ class DiffusionCanvasWindow(QMainWindow):
         Opens a dialog with width/height entry fields, and [Create New] and [Cancel] buttons.
         If [Create New] is clicked, replaces the layer with an empty latent.
         """
-        dialog = NewCanvasDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            width, height = dialog.get_dimensions()
+        with ExceptionCatcher(self, "Failed to create new image"):
+            dialog = NewCanvasDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                width, height = dialog.get_dimensions()
 
-            # Round up to the nearest whole number of latents.
-            # (1x1 latent = 8x8 pixels)
-            latent_size_xy: tuple[int, int] = (
-                int(np.maximum(np.ceil(width / 8), 1)),
-                int(np.maximum(np.ceil(height / 8), 1))
-            )
+                # Round up to the nearest whole number of latents.
+                # (1x1 latent = 8x8 pixels)
+                latent_size_xy: tuple[int, int] = (
+                    int(np.maximum(np.ceil(width / 8), 1)),
+                    int(np.maximum(np.ceil(height / 8), 1))
+                )
 
-            # Create a new latent layer with the specified dimensions
-            self.history = History(self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1]))
-            self.create_undo = True
+                # Create a new latent layer with the specified dimensions
+                self.history = History(self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1]))
+                self.create_undo = True
 
-            # Update the display with the new blank canvas
-            self.update_canvas_view(full=True)
-            print(f"New canvas created with dimensions: {width}x{height}")
+                # Update the display with the new blank canvas
+                self.update_canvas_view(full=True)
+                print(f"New canvas created with dimensions: {width}x{height}")
 
     def on_clicked_load(self):
         """
         Opens a file open dialogue. If a file is opened, replaces the layer with the image.
         """
-        file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+        with ExceptionCatcher(self, "Failed to load image"):
+            file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
 
-        if not file_path:
-            return  # User canceled
+            if not file_path:
+                return  # User canceled
 
-        try:
             # Load the image and convert to a diffusion canvas layer
             image = Image.open(file_path)
             self.history = History(self.api.create_layer_from_image(image))
@@ -435,19 +639,17 @@ class DiffusionCanvasWindow(QMainWindow):
 
             # Redraw the canvas
             self.update_canvas_view(full=True)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
 
     def on_clicked_save(self):
         """
         Opens a file save dialogue. If a destination file is chosen, saves the canvas to that file.
         """
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+        with ExceptionCatcher(self, "Failed to load image"):
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
 
-        if not file_path:
-            return  # User canceled
+            if not file_path:
+                return  # User canceled
 
-        try:
             # Convert the latent space image back to a PIL image
             image = self.api.latent_to_image(self.layer.clean_latent, True, PIL.Image.Image)
 
@@ -455,46 +657,32 @@ class DiffusionCanvasWindow(QMainWindow):
             image.save(file_path)
 
             QMessageBox.information(self, "Save Successful", f"Image saved to {file_path}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save image: {e}")
 
     def add_params_to_palette(self, params):
         """
         Adds a new params object to the palette and creates a corresponding button.
         """
-        self.params_palette.append(params)
-        params_index = len(self.params_palette) - 1
 
-        # Create a layout for the button and rename action
-        button_layout = QHBoxLayout()
+        # Add the deletion handler.
+        def delete_handler(w):
+            if w in self.params_widgets:
+                self.params_widgets.remove(w)
 
-        # Params selection button
-        button = QPushButton(f"Params {params_index + 1}", self)
-        button.clicked.connect(lambda _, p=params: self.set_current_params(p))
-        self.params_buttons.append(button)
-        button_layout.addWidget(button)
+            if self.params_layout.indexOf(w) != -1:  # Check if widget is in the layout
+                self.params_layout.removeWidget(w)
+                w.deleteLater()  # Optionally delete the widget from memory
 
-        # Rename button
-        rename_button = QPushButton("📝", self)
-        rename_button.setFixedWidth(30)
-        rename_button.clicked.connect(lambda: self.rename_params(params_index))
-        button_layout.addWidget(rename_button)
+        params_index = len(self.params_widgets) - 1
+        params_widget = ParamsWidget(
+            parent=self,
+            params=params,
+            button_name=f"Params {params_index + 1}",
+            params_setter=lambda p: self.set_current_params(p),
+            delete_handler=lambda p: delete_handler(p)
+        )
 
-        # Add to layout
-        container = QWidget()
-        container.setLayout(button_layout)
-        self.params_layout.addWidget(container)
-
-    def rename_params(self, index):
-        """
-        Opens a dialog to rename a params button.
-        """
-        current_name = self.params_buttons[index].text()
-        dialog = RenameDialog(self, current_name=current_name)
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            new_name = dialog.get_name()
-            self.params_buttons[index].setText(new_name)
+        self.params_widgets.append(params_widget)
+        self.params_layout.addWidget(params_widget)
 
     def set_current_params(self, params):
         """
@@ -504,30 +692,34 @@ class DiffusionCanvasWindow(QMainWindow):
         print(f"Selected params: {self.params}")
 
     def update_frame(self):
-        denoiser_and_params = pop_intercepted()
+        with ExceptionCatcher(self, "Error occurred in update_frame"):
+            denoiser_and_params = pop_intercepted()
 
-        if denoiser_and_params is not None:
-            self.api.set_denoiser(denoiser_and_params[0])
-            new_params = denoiser_and_params[1]
-            self.add_params_to_palette(new_params)
+            if denoiser_and_params is not None:
+                self.api.set_denoiser(denoiser_and_params[0])
+                new_params = denoiser_and_params[1]
+                self.add_params_to_palette(new_params)
 
-        self.full_preview_timer -= 16
-        if self.full_preview_timer <= 0:
-            self.full_preview_timer = 0
-            if self.showing_quick_preview:
-                self.update_canvas_view(full=True)
+            self.full_preview_timer -= 16
+            if self.full_preview_timer <= 0:
+                self.full_preview_timer = 0
+
+                if self.showing_quick_preview:
+                    self.update_canvas_view(full=True)
 
     def mousePressEvent(self, event):
-        button = event.button()
-        if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
-            self.is_dragging = True
-            self.drag_button = button
-            self.last_button = button
-            self.apply_brush(event)
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            button = event.button()
+            if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
+                self.is_dragging = True
+                self.drag_button = button
+                self.last_button = button
+                self.apply_brush(event)
 
     def mouseMoveEvent(self, event):
-        if self.is_dragging:
-            self.apply_brush(event)
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            if self.is_dragging:
+                self.apply_brush(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == self.drag_button:
@@ -581,20 +773,21 @@ class DiffusionCanvasWindow(QMainWindow):
             self.update_canvas_view(full=False)
 
     def keyPressEvent(self, event: QKeyEvent):
-        """
-        Handles key press events to listen for Ctrl+Z and Ctrl+Shift+Z for undo and redo.
-        """
-        used = False
-        if event.key() == Qt.Key.Key_Z:
-            if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-                self.undo()  # Ctrl+Z
-                used = True
-            elif event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
-                self.redo()  # Ctrl+Shift+Z
-                used = True
+        with ExceptionCatcher(self, "Failed to handle key press event"):
+            """
+            Handles key press events to listen for Ctrl+Z and Ctrl+Shift+Z for undo and redo.
+            """
+            used = False
+            if event.key() == Qt.Key.Key_Z:
+                if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+                    self.undo()  # Ctrl+Z
+                    used = True
+                elif event.modifiers() == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
+                    self.redo()  # Ctrl+Shift+Z
+                    used = True
 
-        if not used:
-            super().keyPressEvent(event)
+            if not used:
+                super().keyPressEvent(event)
 
     def undo(self):
         """
