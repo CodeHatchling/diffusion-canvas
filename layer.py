@@ -3,7 +3,6 @@ import math
 import numpy as np
 import torch
 from typing import Callable
-from time_utils import Timer
 
 
 @torch.no_grad()
@@ -20,14 +19,6 @@ def apply_uniform_maximized_noise(noisy_latent: torch.Tensor,
 
 
 class Layer:
-    '''def __init__(self, latent):
-        self.clean_latent = latent
-        self.noisy_latent = latent.clone()
-        noise_amp_shape = list(latent.shape)
-        noise_amp_shape[1] = 1
-        noise_amp_shape = tuple(noise_amp_shape)
-        self.noise_amplitude = torch.zeros(noise_amp_shape, dtype=latent.dtype, device=latent.device)'''
-
     def __init__(self, clean_latent, noisy_latent, noise_amplitude):
         assert clean_latent.shape == noisy_latent.shape, \
             "clean_latent and noisy_latent shape mismatch" \
@@ -188,5 +179,3 @@ class History:
 
     def redo(self, steps: int = 1):
         self._undo_index = self._clamp_undo_index(self._undo_index + steps)
-
-
