@@ -13,7 +13,7 @@
 
 from PyQt6.QtWidgets import (QLabel, QMainWindow, QVBoxLayout, QWidget, QSlider, QDockWidget,
                              QFormLayout, QLineEdit, QPushButton, QScrollArea, QHBoxLayout,
-                             QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QGridLayout, QSpinBox)
+                             QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QGridLayout, QSpinBox, QLayout)
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent, QKeyEvent
 from PyQt6.QtCore import Qt, QTimer, QRect, QPointF
 import PIL.Image
@@ -237,12 +237,14 @@ class ParamsWidget(QWidget):
     pixmap = property(fget = _get_pixmap, fset = _set_pixmap)
 
 
-class Slider:
+class Slider(QWidget):
     def __init__(self,
                  label: str,
                  default_value: int | float,
                  min_max: tuple[int, int] | tuple[float, float],
-                 step_size: int | float = 1):
+                 step_size: int | float = 1,
+                 parent: QWidget | None = None,):
+        super().__init__(parent)
 
         if not (min_max[1] > min_max[0]):
             raise ValueError(
@@ -289,9 +291,12 @@ class Slider:
         self._value_display.textChanged.connect(self._on_text_changed)
 
         # Add these to a horizontal layout.
-        self.widget = QHBoxLayout()
-        self.widget.addWidget(self._slider)
-        self.widget.addWidget(self._value_display)
+        layout = QHBoxLayout()
+        layout.addWidget(self._slider)
+        layout.addWidget(self._value_display)
+
+        # Add the layout to self.
+        self.setLayout(layout)
 
         # Finally, update the other widgets to match the slider.
         self._on_slider_changed()
@@ -383,96 +388,65 @@ class NewCanvasDialog(QDialog):
             return self.width_input.value(), self.height_input.value()
 
 
-class DiffusionCanvasWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Diffusion Canvas")
+class BaseBrushTool:
+    def __init__(self,
+                 icon_emoji: str,
+                 tool_dock_layout: QLayout,
+                 tool_settings_dock: QDockWidget,
+                 on_tool_button_click: callable):
 
-        self.api = DiffusionCanvasAPI()
+        self._tool_settings_dock = tool_settings_dock
+        self._extra_on_tool_button_click = on_tool_button_click
 
-        # Set up the generator function used by other stuff.
-        global global_generate_image
-        global_generate_image = self.api.generate_image
+        button = QPushButton()
+        button.setText(icon_emoji)
+        button.setFixedWidth(40)
+        button.setFixedHeight(40)
+        button.setStyleSheet("font-size: 25px;")
+        button.clicked.connect(self._on_tool_button_click)
 
-        self.setUpdatesEnabled(True)
+        tool_dock_layout.addWidget(button)
 
-        self.params_widgets: list[ParamsWidget] = []  # List to store params widgets
+        self._tool_settings_dock_widget = self._create_tool_settings_dock_widget()
 
-        self.label = QLabel(self)
+    def _on_tool_button_click(self):
+        with ExceptionCatcher(None, "Failed to handle brush button click"):
+            self._tool_settings_dock.setWidget(self._tool_settings_dock_widget)
+            self._extra_on_tool_button_click()
 
-        # Central layout setup
-        self.canvas_widget = QWidget()
-        canvas_layout = QVBoxLayout(self.canvas_widget)
-        canvas_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.canvas_widget.setLayout(canvas_layout)
+    def _create_tool_settings_dock_widget(self) -> QWidget:
+        ...
 
-        canvas_scroll_area = QScrollArea()
-        canvas_scroll_area.setWidget(self.canvas_widget)
-        canvas_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        canvas_scroll_area.setMinimumWidth(200)
-        canvas_scroll_area.setMinimumHeight(200)
+    def brush_stroke_will_modify(self,
+                                 layer: Layer,
+                                 params,
+                                 mouse_button: Qt.MouseButton,
+                                 normalized_mouse_coord: (float, float)) -> bool:
+        ...
 
-        canvas_layout.addWidget(self.label)
+    def handle_brush_stroke(self,
+                            layer: Layer,
+                            params,
+                            mouse_button: Qt.MouseButton,
+                            normalized_mouse_coord: (float, float)):
+        ...
 
-        self.setCentralWidget(canvas_scroll_area)
 
-        # Add an unfreeze button to return control to sd.webui
-        menu_widget = QWidget()
-        bar_layout = QHBoxLayout(menu_widget)
+class NoiseBrushTool(BaseBrushTool):
 
-        new_image_button = QPushButton("📄", self)
-        new_image_button.clicked.connect(self.on_clicked_new)
-        new_image_button.setFixedWidth(40)
-        new_image_button.setFixedHeight(40)
-        new_image_button.setStyleSheet("font-size: 25px;")
-        bar_layout.addWidget(new_image_button)
+    def __init__(self,
+                 api,
+                 tool_dock_layout: QLayout,
+                 tool_settings_dock: QDockWidget,
+                 on_tool_button_click: callable):
 
-        load_image_button = QPushButton("📂", self)
-        load_image_button.clicked.connect(self.on_clicked_load)
-        load_image_button.setFixedWidth(40)
-        load_image_button.setFixedHeight(40)
-        load_image_button.setStyleSheet("font-size: 25px;")
-        bar_layout.addWidget(load_image_button)
+        super().__init__("🪄", tool_dock_layout, tool_settings_dock, on_tool_button_click)
+        self._api = api
 
-        save_image_button = QPushButton("💾", self)
-        save_image_button.clicked.connect(self.on_clicked_save)
-        save_image_button.setFixedWidth(40)
-        save_image_button.setFixedHeight(40)
-        save_image_button.setStyleSheet("font-size: 25px;")
-        bar_layout.addWidget(save_image_button)
-
-        unfreeze_button = QPushButton("Unfreeze sd.webui", self)
-        unfreeze_button.clicked.connect(unfreeze_sd_webui)
-        unfreeze_button.setFixedHeight(40)
-        bar_layout.addWidget(unfreeze_button)
-
-        self.setMenuWidget(menu_widget)
-
-        # Create a scrollable widget for params buttons
-        self.params_widget = QWidget()
-        self.params_layout = QVBoxLayout(self.params_widget)
-        self.params_widget.setLayout(self.params_layout)
-
-        self.params_scroll_area = QScrollArea()
-        self.params_scroll_area.setWidget(self.params_widget)
-        self.params_scroll_area.setWidgetResizable(True)
-        self.params_scroll_area.setMinimumWidth(200)
-        self.params_scroll_area.setMinimumHeight(300)
-
-        # Dock for params palette
-        params_dock = QDockWidget("Params Palette", self)
-        params_dock.setWidget(self.params_scroll_area)
-        params_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, params_dock)
-
-        # Dock widget for sliders
-        dock = QDockWidget("Controls", self)
-        dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+    def _create_tool_settings_dock_widget(self) -> QWidget:
         sliders_widget = QWidget()
         sliders_layout = QFormLayout(sliders_widget)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
-        # Create sliders and add them to the dock.
         self.slider_noise_brush_radius = Slider(
             "Noise Radius (px)",
             64,
@@ -516,15 +490,193 @@ class DiffusionCanvasWindow(QMainWindow):
             0.01
         )
 
-        sliders_layout.addRow(self.slider_noise_brush_radius.label, self.slider_noise_brush_radius.widget)
-        sliders_layout.addRow(self.slider_noise_brush_intensity.label, self.slider_noise_brush_intensity.widget)
-        sliders_layout.addRow(self.slider_denoise_size_x.label, self.slider_denoise_size_x.widget)
-        sliders_layout.addRow(self.slider_denoise_size_y.label, self.slider_denoise_size_y.widget)
-        sliders_layout.addRow(self.slider_denoise_attenuation.label, self.slider_denoise_attenuation.widget)
-        sliders_layout.addRow(self.slider_denoise_subtraction.label, self.slider_denoise_subtraction.widget)
-        sliders_layout.addRow(self.slider_denoise_bias.label, self.slider_denoise_bias.widget)
+        sliders_layout.addRow(self.slider_noise_brush_radius.label, self.slider_noise_brush_radius)
+        sliders_layout.addRow(self.slider_noise_brush_intensity.label, self.slider_noise_brush_intensity)
+        sliders_layout.addRow(self.slider_denoise_size_x.label, self.slider_denoise_size_x)
+        sliders_layout.addRow(self.slider_denoise_size_y.label, self.slider_denoise_size_y)
+        sliders_layout.addRow(self.slider_denoise_attenuation.label, self.slider_denoise_attenuation)
+        sliders_layout.addRow(self.slider_denoise_subtraction.label, self.slider_denoise_subtraction)
+        sliders_layout.addRow(self.slider_denoise_bias.label, self.slider_denoise_bias)
 
-        dock.setWidget(sliders_widget)
+        return sliders_widget
+
+    def _get_noise_brush_radius(self):
+        return self.slider_noise_brush_radius.value
+    noise_brush_radius = property(_get_noise_brush_radius)
+
+    def _get_noise_brush_intensity(self):
+        return self.slider_noise_brush_intensity.value
+    noise_brush_intensity = property(_get_noise_brush_intensity)
+
+    def _get_denoise_brush_size_x(self):
+        return self.slider_denoise_size_x.value
+    denoise_brush_size_x = property(_get_denoise_brush_size_x)
+
+    def _get_denoise_brush_size_y(self):
+        return self.slider_denoise_size_y.value
+    denoise_brush_size_y = property(_get_denoise_brush_size_y)
+
+    def _get_denoise_attenuation(self):
+        return self.slider_denoise_attenuation.value
+    denoise_attenuation = property(_get_denoise_attenuation)
+
+    def _get_denoise_subtraction(self):
+        return self.slider_denoise_subtraction.value
+    denoise_subtraction = property(_get_denoise_subtraction)
+
+    def _get_denoise_bias(self):
+        return self.slider_denoise_bias.value
+    denoise_bias = property(_get_denoise_bias)
+
+    def brush_stroke_will_modify(self,
+                                 layer: Layer,
+                                 params,
+                                 mouse_button: Qt.MouseButton,
+                                 normalized_mouse_coord: (float, float)) -> bool:
+        return mouse_button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton)
+
+    def handle_brush_stroke(self,
+                            layer: Layer,
+                            params,
+                            mouse_button: Qt.MouseButton,
+                            normalized_mouse_coord: (float, float)):
+        if mouse_button == Qt.MouseButton.LeftButton:
+            self._api.draw_noise_dab(layer=layer,
+                                     position_xy=normalized_mouse_coord,
+                                     pixel_radius=self.noise_brush_radius,
+                                     noise_intensity=self.noise_brush_intensity)
+
+        elif mouse_button == Qt.MouseButton.RightButton:
+            self._api.draw_denoise_dab(layer=layer,
+                                       params=params,
+                                       position_xy=normalized_mouse_coord,
+                                       context_region_pixel_size_xy=(
+                                           self.denoise_brush_size_x,
+                                           self.denoise_brush_size_y
+                                       ),
+                                       attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
+                                       noise_bias=2 ** self.denoise_bias,
+                                       time_budget=0.1)
+
+
+class DiffusionCanvasWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Diffusion Canvas")
+
+        self.api = DiffusionCanvasAPI()
+
+        # Set up the generator function used by other stuff.
+        global global_generate_image
+        global_generate_image = self.api.generate_image
+
+        self.setUpdatesEnabled(True)
+
+        self.params_widgets: list[ParamsWidget] = []  # List to store params widgets
+
+        self.label = QLabel(self)
+
+        # Central layout setup
+        self.canvas_widget = QWidget()
+        canvas_layout = QVBoxLayout(self.canvas_widget)
+        canvas_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.canvas_widget.setLayout(canvas_layout)
+
+        canvas_scroll_area = QScrollArea()
+        canvas_scroll_area.setWidget(self.canvas_widget)
+        canvas_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        canvas_scroll_area.setMinimumWidth(200)
+        canvas_scroll_area.setMinimumHeight(200)
+
+        canvas_layout.addWidget(self.label)
+
+        self.setCentralWidget(canvas_scroll_area)
+
+        # Add a menu widget
+        menu_widget = QWidget()
+        bar_layout = QHBoxLayout(menu_widget)
+
+        new_image_button = QPushButton("📄", self)
+        new_image_button.clicked.connect(self.on_clicked_new)
+        new_image_button.setFixedWidth(40)
+        new_image_button.setFixedHeight(40)
+        new_image_button.setStyleSheet("font-size: 25px;")
+        bar_layout.addWidget(new_image_button)
+
+        load_image_button = QPushButton("📂", self)
+        load_image_button.clicked.connect(self.on_clicked_load)
+        load_image_button.setFixedWidth(40)
+        load_image_button.setFixedHeight(40)
+        load_image_button.setStyleSheet("font-size: 25px;")
+        bar_layout.addWidget(load_image_button)
+
+        save_image_button = QPushButton("💾", self)
+        save_image_button.clicked.connect(self.on_clicked_save)
+        save_image_button.setFixedWidth(40)
+        save_image_button.setFixedHeight(40)
+        save_image_button.setStyleSheet("font-size: 25px;")
+        bar_layout.addWidget(save_image_button)
+
+        unfreeze_button = QPushButton("Unfreeze sd.webui", self)
+        unfreeze_button.clicked.connect(unfreeze_sd_webui)
+        unfreeze_button.setFixedHeight(40)
+        bar_layout.addWidget(unfreeze_button)
+
+        self.setMenuWidget(menu_widget)
+
+        # Create a scrollable widget for params buttons
+        self.params_widget = QWidget()
+        self.params_layout = QVBoxLayout(self.params_widget)
+        self.params_widget.setLayout(self.params_layout)
+
+        self.params_scroll_area = QScrollArea()
+        self.params_scroll_area.setWidget(self.params_widget)
+        self.params_scroll_area.setWidgetResizable(True)
+
+        # Dock for params palette
+        params_dock = QDockWidget("Params Palette", self)
+        params_dock.setWidget(self.params_scroll_area)
+        params_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, params_dock)
+
+        # Dock widget for tool buttons
+        tool_dock = QDockWidget("Tools", self)
+        tool_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        tool_widget = QWidget()
+        tool_layout = QHBoxLayout(tool_widget)
+        tool_dock.setWidget(tool_widget)
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, tool_dock)
+
+        # Dock widget for tool settings
+        tool_settings_dock = QDockWidget("Tool Settings", self)
+        tool_settings_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, tool_settings_dock)
+
+        """
+        api,
+        tool_dock_layout: QLayout,
+        tool_settings_dock: QDockWidget,
+        on_tool_button_click: callable
+        """
+
+        self.current_tool: BaseBrushTool | None = None
+
+        def set_current_tool(tool: BaseBrushTool | None):
+            self.current_tool = tool
+
+        self.noise_brush_tool = NoiseBrushTool(
+            api=self.api,
+            tool_dock_layout=tool_layout,
+            tool_settings_dock=tool_settings_dock,
+            on_tool_button_click=lambda: set_current_tool(self.noise_brush_tool)
+        )
+
+        self.noise_brush_tool2 = NoiseBrushTool(
+            api=self.api,
+            tool_dock_layout=tool_layout,
+            tool_settings_dock=tool_settings_dock,
+            on_tool_button_click=lambda: set_current_tool(self.noise_brush_tool2)
+        )
 
         # Setup update timer
         self.timer = QTimer(self)
@@ -577,34 +729,6 @@ class DiffusionCanvasWindow(QMainWindow):
     def _get_layer(self) -> Layer:
         return self.history.layer
     layer = property(fget=_get_layer)
-
-    def _get_noise_brush_radius(self):
-        return self.slider_noise_brush_radius.value
-    noise_brush_radius = property(_get_noise_brush_radius)
-
-    def _get_noise_brush_intensity(self):
-        return self.slider_noise_brush_intensity.value
-    noise_brush_intensity = property(_get_noise_brush_intensity)
-
-    def _get_denoise_brush_size_x(self):
-        return self.slider_denoise_size_x.value
-    denoise_brush_size_x = property(_get_denoise_brush_size_x)
-
-    def _get_denoise_brush_size_y(self):
-        return self.slider_denoise_size_y.value
-    denoise_brush_size_y = property(_get_denoise_brush_size_y)
-
-    def _get_denoise_attenuation(self):
-        return self.slider_denoise_attenuation.value
-    denoise_attenuation = property(_get_denoise_attenuation)
-
-    def _get_denoise_subtraction(self):
-        return self.slider_denoise_subtraction.value
-    denoise_subtraction = property(_get_denoise_subtraction)
-
-    def _get_denoise_bias(self):
-        return self.slider_denoise_bias.value
-    denoise_bias = property(_get_denoise_bias)
 
     def on_clicked_new(self):
         """
@@ -742,6 +866,9 @@ class DiffusionCanvasWindow(QMainWindow):
 
     @torch.no_grad()
     def apply_brush(self, event: QMouseEvent):
+        if self.current_tool is None:
+            return
+
         pixmap: QPixmap = self.label.pixmap()
         mouse_pos = event.globalPosition()
         image_rect: QRect = pixmap.rect()
@@ -758,30 +885,19 @@ class DiffusionCanvasWindow(QMainWindow):
         if normalized_position[1] < 0 or normalized_position[1] > 1:
             return
 
-        if self.drag_button == Qt.MouseButton.LeftButton:
+        if self.current_tool.brush_stroke_will_modify(layer=self.layer,
+                                                      params=self.params,
+                                                      mouse_button=self.drag_button,
+                                                      normalized_mouse_coord=normalized_position):
             if self.create_undo:
                 self.history.register_undo()
                 self.create_undo = False
-            self.api.draw_noise_dab(layer=self.layer,
-                                    position_xy=normalized_position,
-                                    pixel_radius=self.noise_brush_radius,
-                                    noise_intensity=self.noise_brush_intensity)
-            self.update_canvas_view(full=False)
 
-        elif self.drag_button == Qt.MouseButton.RightButton:
-            if self.create_undo:
-                self.history.register_undo()
-                self.create_undo = False
-            self.api.draw_denoise_dab(layer=self.layer,
-                                      params=self.params,
-                                      position_xy=normalized_position,
-                                      context_region_pixel_size_xy=(
-                                          self.denoise_brush_size_x,
-                                          self.denoise_brush_size_y
-                                      ),
-                                      attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
-                                      noise_bias=2 ** self.denoise_bias,
-                                      time_budget=0.1)
+            self.current_tool.handle_brush_stroke(layer=self.layer,
+                                                  params=self.params,
+                                                  mouse_button=self.drag_button,
+                                                  normalized_mouse_coord=normalized_position)
+
             self.update_canvas_view(full=False)
 
     def keyPressEvent(self, event: QKeyEvent):
