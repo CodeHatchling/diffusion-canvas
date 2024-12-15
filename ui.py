@@ -379,7 +379,7 @@ class NewCanvasDialog(QDialog):
         self.layout.addWidget(self.buttons, 2, 0, 1, 2)
 
     def get_dimensions(self):
-        with ExceptionCatcher(self, "Failed to handle mouse event"):
+        with ExceptionCatcher(self, "Failed to get dimensions"):
             return self.width_input.value(), self.height_input.value()
 
 
@@ -548,7 +548,7 @@ class DiffusionCanvasWindow(QMainWindow):
         self.update_canvas_view(full=False)
 
     def closeEvent(self, event):
-        with ExceptionCatcher(self, "Failed to handle mouse event"):
+        with ExceptionCatcher(self, "Failed to handle close event"):
             """
             Override this method to handle tasks before the window closes.
             """
@@ -653,7 +653,7 @@ class DiffusionCanvasWindow(QMainWindow):
         """
         Opens a file save dialogue. If a destination file is chosen, saves the canvas to that file.
         """
-        with ExceptionCatcher(self, "Failed to load image"):
+        with ExceptionCatcher(self, "Failed to save image"):
             file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
 
             if not file_path:
@@ -668,7 +668,7 @@ class DiffusionCanvasWindow(QMainWindow):
             QMessageBox.information(self, "Save Successful", f"Image saved to {file_path}")
 
     def add_params_to_palette(self, params):
-        with ExceptionCatcher(self, "Failed to handle mouse event"):
+        with ExceptionCatcher(self, "Failed to add params"):
             """
             Adds a new params object to the palette and creates a corresponding button.
             """
