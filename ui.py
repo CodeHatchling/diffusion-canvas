@@ -89,16 +89,17 @@ class EditParamsDialog(QDialog):
         self.layout.addWidget(self.buttons)
 
     def generate_thumbnail(self, params):
-        if global_generate_image is None:
-            return
+        with ExceptionCatcher(None, "Failed to generate thumbnail"):
+            if global_generate_image is None:
+                return
 
-        if params is None:
-            return
+            if params is None:
+                return
 
-        import texture_convert as conv
-        image = conv.convert(global_generate_image(512, 512, 20, params), QImage)
-        image = QPixmap.fromImage(image)
-        self.image.setPixmap(image)
+            import texture_convert as conv
+            image = conv.convert(global_generate_image(512, 512, 20, params), QImage)
+            image = QPixmap.fromImage(image)
+            self.image.setPixmap(image)
 
     def get_output(self) -> Output:
         return EditParamsDialog.Output(
@@ -189,37 +190,40 @@ class ParamsWidget(QWidget):
         """
         Opens a dialog to rename a params button.
         """
-        dialog = EditParamsDialog(current_widget=self, parent=None)
+        with ExceptionCatcher(None, "Failed to handle rename request"):
+            dialog = EditParamsDialog(current_widget=self, parent=None)
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            output = dialog.get_output()
-            self.button_image.setPixmap(output.pixmap)
-            self.button_label.setText(output.name)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                output = dialog.get_output()
+                self.button_image.setPixmap(output.pixmap)
+                self.button_label.setText(output.name)
 
     def on_delete(self):
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Delete Params")  # Set the title
-        dialog.setText(f"Do you want to delete the \"{self.name}\" params?")  # Set the main message
-        dialog.setInformativeText("Press \"Delete\" to delete them, press \"Cancel\" to keep them.\n"
-                                  "This cannot be undone.")  # Optional detailed message
-        dialog.setIcon(QMessageBox.Icon.Warning)  # Set an icon (e.g., Question, Information, Warning, Critical)
+        with ExceptionCatcher(None, "Failed to handle delete request"):
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Delete Params")  # Set the title
+            dialog.setText(f"Do you want to delete the \"{self.name}\" params?")  # Set the main message
+            dialog.setInformativeText("Press \"Delete\" to delete them, press \"Cancel\" to keep them.\n"
+                                      "This cannot be undone.")  # Optional detailed message
+            dialog.setIcon(QMessageBox.Icon.Warning)  # Set an icon (e.g., Question, Information, Warning, Critical)
 
-        # Add custom buttons
-        accept_button = dialog.addButton("Delete", QMessageBox.ButtonRole.AcceptRole)
-        dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            # Add custom buttons
+            accept_button = dialog.addButton("Delete", QMessageBox.ButtonRole.AcceptRole)
+            dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
 
-        # Execute the dialog
-        dialog.exec()
+            # Execute the dialog
+            dialog.exec()
 
-        # Determine which button was clicked
-        if dialog.clickedButton() == accept_button:
-            self.delete_handler(self)
+            # Determine which button was clicked
+            if dialog.clickedButton() == accept_button:
+                self.delete_handler(self)
 
     def _get_name(self) -> str:
         return self.button_label.text()
 
     def _set_name(self, value: str):
-        self.button_label.setText(value)
+        with ExceptionCatcher(None, "Failed to assign name"):
+            self.button_label.setText(value)
 
     name = property(fget = _get_name, fset = _set_name)
 
@@ -227,7 +231,8 @@ class ParamsWidget(QWidget):
         return self.button_image.pixmap()
 
     def _set_pixmap(self, value: QPixmap):
-        self.button_image.setPixmap(value)
+        with ExceptionCatcher(None, "Failed to assign pixmap"):
+            self.button_image.setPixmap(value)
 
     pixmap = property(fget = _get_pixmap, fset = _set_pixmap)
 
@@ -312,32 +317,34 @@ class Slider:
         return np.clip((step / self._steps) * self._span + self._range[0], a_min=self._range[0], a_max=self._range[1])
 
     def _on_slider_changed(self):
-        if self.recursion_check:
-            return
+        with ExceptionCatcher(None, "Failed to handle slider change"):
+            if self.recursion_check:
+                return
 
-        self.recursion_check = True
-        try:
-            self._value = self._step_to_value(self._slider.value())
-            if self._is_int:
-                self.value = int(self._value)
-                self._value_display.setText(f"{self._value}")
-            else:
-                self._value_display.setText(f"{self._value:.2f}")
-        finally:
-            self.recursion_check = False
+            self.recursion_check = True
+            try:
+                self._value = self._step_to_value(self._slider.value())
+                if self._is_int:
+                    self.value = int(self._value)
+                    self._value_display.setText(f"{self._value}")
+                else:
+                    self._value_display.setText(f"{self._value:.2f}")
+            finally:
+                self.recursion_check = False
 
     def _on_text_changed(self):
-        if self.recursion_check:
-            return
+        with ExceptionCatcher(None, "Failed to handle text change"):
+            if self.recursion_check:
+                return
 
-        self.recursion_check = True
-        try:
-            self._value = int(self._value_display.text()) if self._is_int else float(self._value_display.text())
-            self._slider.setValue(self._value_to_step(self._value))
-        except ValueError:
-            return
-        finally:
-            self.recursion_check = False
+            self.recursion_check = True
+            try:
+                self._value = int(self._value_display.text()) if self._is_int else float(self._value_display.text())
+                self._slider.setValue(self._value_to_step(self._value))
+            except ValueError:
+                return
+            finally:
+                self.recursion_check = False
 
 
 class NewCanvasDialog(QDialog):
@@ -372,7 +379,8 @@ class NewCanvasDialog(QDialog):
         self.layout.addWidget(self.buttons, 2, 0, 1, 2)
 
     def get_dimensions(self):
-        return self.width_input.value(), self.height_input.value()
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            return self.width_input.value(), self.height_input.value()
 
 
 class DiffusionCanvasWindow(QMainWindow):
@@ -540,26 +548,27 @@ class DiffusionCanvasWindow(QMainWindow):
         self.update_canvas_view(full=False)
 
     def closeEvent(self, event):
-        """
-        Override this method to handle tasks before the window closes.
-        """
-        reply = QMessageBox.question(
-            self,
-            "Confirm Exit",
-            "Are you sure you want to exit?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            """
+            Override this method to handle tasks before the window closes.
+            """
+            reply = QMessageBox.question(
+                self,
+                "Confirm Exit",
+                "Are you sure you want to exit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            # Perform cleanup tasks here
-            print("Closing the application...")
+            if reply == QMessageBox.StandardButton.Yes:
+                # Perform cleanup tasks here
+                print("Closing the application...")
 
-            # Clean up memory and such.
-            self.release()
+                # Clean up memory and such.
+                self.release()
 
-            event.accept()  # Accept the close event
-        else:
-            event.ignore()  # Ignore the close event
+                event.accept()  # Accept the close event
+            else:
+                event.ignore()  # Ignore the close event
 
     def release(self):
         global global_generate_image
@@ -659,37 +668,39 @@ class DiffusionCanvasWindow(QMainWindow):
             QMessageBox.information(self, "Save Successful", f"Image saved to {file_path}")
 
     def add_params_to_palette(self, params):
-        """
-        Adds a new params object to the palette and creates a corresponding button.
-        """
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            """
+            Adds a new params object to the palette and creates a corresponding button.
+            """
 
-        # Add the deletion handler.
-        def delete_handler(w):
-            if w in self.params_widgets:
-                self.params_widgets.remove(w)
+            # Add the deletion handler.
+            def delete_handler(w):
+                if w in self.params_widgets:
+                    self.params_widgets.remove(w)
 
-            if self.params_layout.indexOf(w) != -1:  # Check if widget is in the layout
-                self.params_layout.removeWidget(w)
-                w.deleteLater()  # Optionally delete the widget from memory
+                if self.params_layout.indexOf(w) != -1:  # Check if widget is in the layout
+                    self.params_layout.removeWidget(w)
+                    w.deleteLater()  # Optionally delete the widget from memory
 
-        params_index = len(self.params_widgets) - 1
-        params_widget = ParamsWidget(
-            parent=self,
-            params=params,
-            button_name=f"Params {params_index + 1}",
-            params_setter=lambda p: self.set_current_params(p),
-            delete_handler=lambda p: delete_handler(p)
-        )
+            params_index = len(self.params_widgets) - 1
+            params_widget = ParamsWidget(
+                parent=self,
+                params=params,
+                button_name=f"Params {params_index + 1}",
+                params_setter=lambda p: self.set_current_params(p),
+                delete_handler=lambda p: delete_handler(p)
+            )
 
-        self.params_widgets.append(params_widget)
-        self.params_layout.addWidget(params_widget)
+            self.params_widgets.append(params_widget)
+            self.params_layout.addWidget(params_widget)
 
     def set_current_params(self, params):
-        """
-        Sets the current params object to be used for denoising.
-        """
-        self.params = params
-        print(f"Selected params: {self.params}")
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            """
+            Sets the current params object to be used for denoising.
+            """
+            self.params = params
+            print(f"Selected params: {self.params}")
 
     def update_frame(self):
         with ExceptionCatcher(self, "Error occurred in update_frame"):
@@ -722,11 +733,12 @@ class DiffusionCanvasWindow(QMainWindow):
                 self.apply_brush(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == self.drag_button:
-            self.is_dragging = False
-            self.drag_button = None
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            if event.button() == self.drag_button:
+                self.is_dragging = False
+                self.drag_button = None
 
-        self.create_undo = True
+            self.create_undo = True
 
     @torch.no_grad()
     def apply_brush(self, event: QMouseEvent):
@@ -793,15 +805,17 @@ class DiffusionCanvasWindow(QMainWindow):
         """
         Undo the last action.
         """
-        self.history.undo(1)
-        self.update_canvas_view(full=False)
+        with ExceptionCatcher(None, "Failed to undo"):
+            self.history.undo(1)
+            self.update_canvas_view(full=False)
 
     def redo(self):
         """
         Redo the previously undone action.
         """
-        self.history.redo(1)
-        self.update_canvas_view(full=False)
+        with ExceptionCatcher(None, "Failed to redo"):
+            self.history.redo(1)
+            self.update_canvas_view(full=False)
 
     def update_canvas_view(self, full: bool):
         latent_to_show = (
