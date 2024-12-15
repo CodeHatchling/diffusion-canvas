@@ -397,6 +397,7 @@ class BaseBrushTool:
 
         self._tool_settings_dock = tool_settings_dock
         self._extra_on_tool_button_click = on_tool_button_click
+        self.show_noisy = False
 
         button = QPushButton()
         button.setText(icon_emoji)
@@ -545,6 +546,7 @@ class NoiseBrushTool(BaseBrushTool):
                                      position_xy=normalized_mouse_coord,
                                      pixel_radius=self.noise_brush_radius,
                                      noise_intensity=self.noise_brush_intensity)
+            self.show_noisy = True
 
         elif mouse_button == Qt.MouseButton.RightButton:
             self._api.draw_denoise_dab(layer=layer,
@@ -557,6 +559,79 @@ class NoiseBrushTool(BaseBrushTool):
                                        attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
                                        noise_bias=2 ** self.denoise_bias,
                                        time_budget=0.1)
+            self.show_noisy = False
+
+
+class LatentBrushTool(BaseBrushTool):
+
+    brush_value: tuple[float, float, float, float]
+
+    def __init__(self,
+                 api,
+                 tool_dock_layout: QLayout,
+                 tool_settings_dock: QDockWidget,
+                 on_tool_button_click: callable):
+
+        super().__init__("🖌️️", tool_dock_layout, tool_settings_dock, on_tool_button_click)
+        self._api = api
+        self.brush_value = (0.0, 0.0, 0.0, 0.0)
+
+    def _create_tool_settings_dock_widget(self) -> QWidget:
+        sliders_widget = QWidget()
+        sliders_layout = QFormLayout(sliders_widget)
+
+        self.slider_brush_radius = Slider(
+            "Brush Radius (px)",
+            64,
+            (0, 512),
+            0.1
+        )
+
+        self.slider_brush_opacity = Slider(
+            "Brush Intensity",
+            1.0,
+            (0.0, 1.0),
+            0.01
+        )
+
+        sliders_layout.addRow(self.slider_brush_radius.label, self.slider_brush_radius)
+        sliders_layout.addRow(self.slider_brush_opacity.label, self.slider_brush_opacity)
+
+        return sliders_widget
+
+    def _get_brush_radius(self):
+        return self.slider_brush_radius.value
+    brush_radius = property(_get_brush_radius)
+
+    def _get_brush_opacity(self):
+        return self.slider_brush_opacity.value
+    brush_opacity = property(_get_brush_opacity)
+
+    def brush_stroke_will_modify(self,
+                                 layer: Layer,
+                                 params,
+                                 mouse_button: Qt.MouseButton,
+                                 normalized_mouse_coord: (float, float)) -> bool:
+        return mouse_button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton)
+
+    def handle_brush_stroke(self,
+                            layer: Layer,
+                            params,
+                            mouse_button: Qt.MouseButton,
+                            normalized_mouse_coord: (float, float)):
+        if mouse_button == Qt.MouseButton.LeftButton:
+            self._api.draw_latent_dab(layer=layer,
+                                      value=self.brush_value,
+                                      position_xy=normalized_mouse_coord,
+                                      pixel_radius=self.brush_radius,
+                                      opacity=self.brush_opacity)
+            self.show_noisy = False
+
+        elif mouse_button == Qt.MouseButton.RightButton:
+            self.brush_value = self._api.get_average_latent(layer=layer,
+                                                            position_xy=normalized_mouse_coord,
+                                                            pixel_radius=self.brush_radius)
+            self.show_noisy = False
 
 
 class DiffusionCanvasWindow(QMainWindow):
@@ -641,9 +716,10 @@ class DiffusionCanvasWindow(QMainWindow):
 
         # Dock widget for tool buttons
         tool_dock = QDockWidget("Tools", self)
-        tool_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        tool_dock.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
         tool_widget = QWidget()
         tool_layout = QHBoxLayout(tool_widget)
+        tool_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         tool_dock.setWidget(tool_widget)
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, tool_dock)
 
@@ -671,11 +747,11 @@ class DiffusionCanvasWindow(QMainWindow):
             on_tool_button_click=lambda: set_current_tool(self.noise_brush_tool)
         )
 
-        self.noise_brush_tool2 = NoiseBrushTool(
+        self.latent_brush_tool = LatentBrushTool(
             api=self.api,
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
-            on_tool_button_click=lambda: set_current_tool(self.noise_brush_tool2)
+            on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool)
         )
 
         # Setup update timer
@@ -692,12 +768,12 @@ class DiffusionCanvasWindow(QMainWindow):
         # Track mouse dragging
         self.is_dragging = False
         self.drag_button = None
-        self.last_button = None
+        self.show_noisy = False
 
         self.history = History(self.api.create_empty_layer(512//8, 512//8))
         self.create_undo = True
 
-        self.update_canvas_view(full=False)
+        self.update_canvas_view(noisy=False, full=False)
 
     def closeEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle close event"):
@@ -752,7 +828,7 @@ class DiffusionCanvasWindow(QMainWindow):
                 self.create_undo = True
 
                 # Update the display with the new blank canvas
-                self.update_canvas_view(full=True)
+                self.update_canvas_view(noisy=False, full=True)
                 print(f"New canvas created with dimensions: {width}x{height}")
 
     def on_clicked_load(self):
@@ -771,7 +847,7 @@ class DiffusionCanvasWindow(QMainWindow):
             self.create_undo = True
 
             # Redraw the canvas
-            self.update_canvas_view(full=True)
+            self.update_canvas_view(noisy=False, full=True)
 
     def on_clicked_save(self):
         """
@@ -848,7 +924,6 @@ class DiffusionCanvasWindow(QMainWindow):
             if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
                 self.is_dragging = True
                 self.drag_button = button
-                self.last_button = button
                 self.apply_brush(event)
 
     def mouseMoveEvent(self, event):
@@ -898,7 +973,7 @@ class DiffusionCanvasWindow(QMainWindow):
                                                   mouse_button=self.drag_button,
                                                   normalized_mouse_coord=normalized_position)
 
-            self.update_canvas_view(full=False)
+            self.update_canvas_view(noisy=self.current_tool.show_noisy, full=False)
 
     def keyPressEvent(self, event: QKeyEvent):
         with ExceptionCatcher(self, "Failed to handle key press event"):
@@ -933,10 +1008,14 @@ class DiffusionCanvasWindow(QMainWindow):
             self.history.redo(1)
             self.update_canvas_view(full=False)
 
-    def update_canvas_view(self, full: bool):
+    def update_canvas_view(self, noisy: bool | None = None, full: bool = True):
+
+        if isinstance(noisy, bool):
+            self.show_noisy = noisy
+
         latent_to_show = (
             self.layer.noisy_latent
-            if self.last_button == Qt.MouseButton.LeftButton
+            if self.show_noisy
             else self.layer.clean_latent
         )
 

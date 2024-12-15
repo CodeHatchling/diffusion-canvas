@@ -129,6 +129,52 @@ class DiffusionCanvasAPI:
         return decode_image(latent, full_quality=True)
 
     @torch.no_grad()
+    def draw_latent_dab(self,
+                       layer: Layer,
+                       value: tuple[float, float, float, float],
+                       position_xy: tuple[float, float],
+                       pixel_radius: float,
+                       opacity: float):
+
+        latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
+            position_xy,
+            layer.noise_amplitude
+        )
+
+        alpha = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            pixel_radius / 8,
+            (1, 1, 1, 1),
+            opacity=opacity,
+            mode="blend"
+        ).to(layer.clean_latent.device)
+
+        layer.blend_latent(value, alpha)
+
+    @torch.no_grad()
+    def get_average_latent(self,
+                           layer: Layer,
+                           position_xy: tuple[float, float],
+                           pixel_radius: float):
+
+        latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
+            position_xy,
+            layer.noise_amplitude
+        )
+
+        weight = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            pixel_radius / 8,
+            (1, 1, 1, 1),
+            opacity=1,
+            mode="blend"
+        ).to(layer.clean_latent.device)
+
+        return layer.get_average_latent(weight)
+
+    @torch.no_grad()
     def draw_noise_dab(self,
                        layer: Layer, 
                        position_xy: tuple[float, float],
