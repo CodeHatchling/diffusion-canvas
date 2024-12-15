@@ -108,6 +108,28 @@ class DiffusionCanvasAPI:
         self._denoiser = denoiser
 
     @torch.no_grad()
+    def generate_image(self, width: int, height: int, steps: int, params: any) -> torch.Tensor:
+        width = int(np.maximum(1, np.ceil(width / 8)))
+        height = int(np.maximum(1, np.ceil(height / 8)))
+
+        sigma = 20
+        latent = torch.randn(size=(1, 4, height, width), dtype=torch.float32, device=shared.device) * sigma
+
+        for i in range(steps):
+            sigma_to_remove = (i+1) / steps
+            denoised = denoise(denoiser=self._denoiser, latent=latent, sigma=sigma, params=params)
+
+            if i+1 == steps:
+                latent = denoised
+                sigma = 0
+            else:
+                latent = denoised * sigma_to_remove + latent * (1-sigma_to_remove)
+                sigma = sigma * (1-sigma_to_remove)
+
+        return decode_image(latent, full_quality=True)
+
+
+    @torch.no_grad()
     def draw_noise_dab(self,
                        layer: Layer, 
                        position_xy: tuple[float, float],
