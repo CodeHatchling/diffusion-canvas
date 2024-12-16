@@ -55,34 +55,40 @@ class Layer:
         self.noise_amplitude = noise_amplitude
 
     @torch.no_grad()
-    def blend_latent(self, value: (float, float, float, float), alpha: torch.Tensor):
-        """
-        Blends clean_latent with a constant value tensor scaled by alpha.
-
-        Parameters:
-        - value: tuple of 4 floats (one value per channel).
-        - alpha: torch.Tensor with blending weights (same shape as clean_latent).
-        """
-        # Get the difference between noisy and clean latent
-        noise_only = self.noisy_latent - self.clean_latent
-
+    def create_solid_latent(self, value: (float, float, float, float)):
         # Create a tensor with the same shape as clean_latent, where each channel is set to value[channel]
         value_tensor = torch.tensor(
             value,
             dtype=self.clean_latent.dtype,
             device=self.clean_latent.device
         ).view(1, -1, 1, 1)
-        value_tensor = value_tensor.expand_as(self.clean_latent)  # Broadcast to match clean_latent shape
+        return value_tensor.expand_as(self.clean_latent)  # Broadcast to match clean_latent shape
 
-        # Perform blending
-        self.clean_latent = value_tensor * alpha + self.clean_latent * (1 - alpha)
+    @torch.no_grad()
+    def replace_clean_latent(self, new_clean_latent: torch.Tensor):
+        """
+        Replaces the contents of clean_latent while maintaining the difference to its noisy counterpart.
+        Useful for editing.
+        """
+        # Get the difference between noisy and clean latent
+        noise_only = self.noisy_latent - self.clean_latent
+
+        # Replace
+        self.clean_latent = new_clean_latent
+
+        # Recalculate the noisy latent.
         self.noisy_latent = self.clean_latent + noise_only
 
+    @torch.no_grad()
     def get_average_latent(self, mask: torch.Tensor | None):
-
         if isinstance(mask, torch.Tensor):
-            masked = self.clean_latent * mask
-            average = masked.mean(dim=(0, 2, 3)) / mask.mean()
+            mask_mean = mask.mean().squeeze().item()
+
+            if mask_mean > 0:
+                masked = self.clean_latent * mask
+                average = masked.mean(dim=(0, 2, 3)) / mask_mean
+            else:
+                average = self.clean_latent.mean(dim=(0, 2, 3))
         else:
             average = self.clean_latent.mean(dim=(0, 2, 3))
 
@@ -90,8 +96,6 @@ class Layer:
         result = tuple(average.tolist())
 
         return result
-
-
 
     @torch.no_grad()
     def add_noise(self, desired_amplitude_increase: torch.Tensor):

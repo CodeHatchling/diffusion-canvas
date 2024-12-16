@@ -20,6 +20,7 @@ from layer import Layer
 from sdwebui_interface import encode_image, decode_image, denoise
 import modules.shared as shared
 from time_utils import TimeBudget
+from enum import Enum
 
 
 def _center_crop_for_sd(image: PIL.Image.Image, rounding: int):
@@ -69,6 +70,11 @@ def _position_to_latent_coords(position_xy: tuple[float, float],
 
 
 class DiffusionCanvasAPI:
+    class BlendMode(Enum):
+        Blend = 0
+        Add = 1
+        Merge = 2
+
     def __init__(self):
         self._brushes = Brushes()
         self._denoiser = None
@@ -130,11 +136,15 @@ class DiffusionCanvasAPI:
 
     @torch.no_grad()
     def draw_latent_dab(self,
-                       layer: Layer,
-                       value: tuple[float, float, float, float],
-                       position_xy: tuple[float, float],
-                       pixel_radius: float,
-                       opacity: float):
+                        layer: Layer,
+                        blend_mode: 'DiffusionCanvasAPI.BlendMode',
+                        value: tuple[float, float, float, float],
+                        position_xy: tuple[float, float],
+                        pixel_radius: float,
+                        opacity: float):
+
+        if blend_mode not in DiffusionCanvasAPI.BlendMode:
+            blend_mode = DiffusionCanvasAPI.BlendMode.Blend
 
         latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
             position_xy,
@@ -150,7 +160,23 @@ class DiffusionCanvasAPI:
             mode="blend"
         ).to(layer.clean_latent.device)
 
-        layer.blend_latent(value, alpha)
+        if blend_mode == DiffusionCanvasAPI.BlendMode.Add:
+            solid = layer.create_solid_latent(value)
+            new_clean_latent = solid * alpha + layer.clean_latent
+            layer.replace_clean_latent(new_clean_latent)
+
+        elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
+            average = layer.get_average_latent(alpha)
+            difference = tuple(v - a for v, a in zip(value, average))
+            solid = layer.create_solid_latent(difference)
+            new_clean_latent = solid * alpha + layer.clean_latent
+            layer.replace_clean_latent(new_clean_latent)
+            pass
+
+        else:
+            solid = layer.create_solid_latent(value)
+            new_clean_latent = solid * alpha + layer.clean_latent * (1-alpha)
+            layer.replace_clean_latent(new_clean_latent)
 
     @torch.no_grad()
     def get_average_latent(self,

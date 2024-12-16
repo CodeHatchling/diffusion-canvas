@@ -13,7 +13,8 @@
 
 from PyQt6.QtWidgets import (QLabel, QMainWindow, QVBoxLayout, QWidget, QSlider, QDockWidget,
                              QFormLayout, QLineEdit, QPushButton, QScrollArea, QHBoxLayout,
-                             QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QGridLayout, QSpinBox, QLayout)
+                             QDialog, QDialogButtonBox, QFileDialog, QMessageBox, QGridLayout, QSpinBox, QLayout,
+                             QComboBox)
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent, QKeyEvent
 from PyQt6.QtCore import Qt, QTimer, QRect, QPointF
 import PIL.Image
@@ -40,7 +41,7 @@ class ExceptionCatcher:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
-            QMessageBox.critical(self.context, f"Error: {exc_type}", f"{self.message}: {exc_value}")
+            QMessageBox.critical(self.context, f"Error: {exc_type}", f"{self.message}: {exc_value}\n\n{traceback}")
         return True  # Suppress exceptions
 
 
@@ -225,7 +226,7 @@ class ParamsWidget(QWidget):
         with ExceptionCatcher(None, "Failed to assign name"):
             self.button_label.setText(value)
 
-    name = property(fget = _get_name, fset = _set_name)
+    name = property(fget=_get_name, fset=_set_name)
 
     def _get_pixmap(self) -> QPixmap:
         return self.button_image.pixmap()
@@ -234,7 +235,7 @@ class ParamsWidget(QWidget):
         with ExceptionCatcher(None, "Failed to assign pixmap"):
             self.button_image.setPixmap(value)
 
-    pixmap = property(fget = _get_pixmap, fset = _set_pixmap)
+    pixmap = property(fget=_get_pixmap, fset=_set_pixmap)
 
 
 class Slider(QWidget):
@@ -448,6 +449,11 @@ class NoiseBrushTool(BaseBrushTool):
         sliders_widget = QWidget()
         sliders_layout = QFormLayout(sliders_widget)
 
+        # Add a help message:
+        sliders_layout.addRow("Left click", QLabel("Add noise"))
+        sliders_layout.addRow("Right click", QLabel("Denoise"))
+
+        # Add sliders:
         self.slider_noise_brush_radius = Slider(
             "Noise Radius (px)",
             64,
@@ -580,6 +586,18 @@ class LatentBrushTool(BaseBrushTool):
         sliders_widget = QWidget()
         sliders_layout = QFormLayout(sliders_widget)
 
+        # Add a help message:
+        sliders_layout.addRow("Left click", QLabel("Paint Color"))
+        sliders_layout.addRow("Right click", QLabel("Select Color with Eyedropper"))
+
+        # Add a blend mode dropdown:
+        self.blend_mode_combo = QComboBox()
+        self.blend_mode_combo.addItems(
+            [mode.name for mode in DiffusionCanvasAPI.BlendMode]
+        )
+        sliders_layout.addRow("Blend Mode", self.blend_mode_combo)
+
+        # Add sliders:
         self.slider_brush_radius = Slider(
             "Brush Radius (px)",
             64,
@@ -607,6 +625,14 @@ class LatentBrushTool(BaseBrushTool):
         return self.slider_brush_opacity.value
     brush_opacity = property(_get_brush_opacity)
 
+    def _get_blend_mode(self) -> DiffusionCanvasAPI.BlendMode:
+        index = self.blend_mode_combo.currentIndex()
+        try:
+            return DiffusionCanvasAPI.BlendMode(index)
+        except ValueError:
+            return DiffusionCanvasAPI.BlendMode.Blend  # Default to Blend if invalid
+    blend_mode = property(_get_blend_mode)
+
     def brush_stroke_will_modify(self,
                                  layer: Layer,
                                  params,
@@ -621,10 +647,12 @@ class LatentBrushTool(BaseBrushTool):
                             normalized_mouse_coord: (float, float)):
         if mouse_button == Qt.MouseButton.LeftButton:
             self._api.draw_latent_dab(layer=layer,
+                                      blend_mode=self.blend_mode,
                                       value=self.brush_value,
                                       position_xy=normalized_mouse_coord,
                                       pixel_radius=self.brush_radius,
                                       opacity=self.brush_opacity)
+
             self.show_noisy = False
 
         elif mouse_button == Qt.MouseButton.RightButton:
