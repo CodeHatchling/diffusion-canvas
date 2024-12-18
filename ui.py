@@ -41,7 +41,11 @@ class ExceptionCatcher:
 
     def __exit__(self, exc_type, exc_value, traceback):
         if exc_type:
-            QMessageBox.critical(self.context, f"Error: {exc_type}", f"{self.message}: {exc_value}\n\n{traceback}")
+            import traceback as tb
+            except_string = '\n'.join(tb.format_exception(exc_type, exc_value, traceback))
+            QMessageBox.critical(self.context, f"Error: {exc_type}", f"{self.message}: {exc_value}\n"
+                                                                     f"\n" +
+                                                                     except_string)
         return True  # Suppress exceptions
 
 
