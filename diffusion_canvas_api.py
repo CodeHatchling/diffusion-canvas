@@ -80,6 +80,7 @@ class DiffusionCanvasAPI:
         self._denoiser = None
 
     @staticmethod
+    @torch.no_grad()
     def create_layer_from_image(image: PIL.Image.Image) -> Layer:
         image = _center_crop_for_sd(image, 8).convert(mode="RGB")
         image_tensor = conv.convert(image, torch.Tensor).to(shared.device)
@@ -94,6 +95,7 @@ class DiffusionCanvasAPI:
             noise_amplitude
         )
 
+    @torch.no_grad()
     def create_empty_layer(self, latent_width: int, latent_height: int):
         clean = torch.zeros(size=(1, 4, latent_height, latent_width), dtype=torch.float32, device=shared.device)
         noisy = torch.zeros(size=(1, 4, latent_height, latent_width), dtype=torch.float32, device=shared.device)
@@ -105,6 +107,7 @@ class DiffusionCanvasAPI:
         )
 
     @staticmethod
+    @torch.no_grad()
     def latent_to_image(latent: torch.Tensor, full_quality: bool, dest_type):
         decoded = decode_image(latent, full_quality)
         converted = conv.convert(decoded, dest_type)
@@ -228,6 +231,7 @@ class DiffusionCanvasAPI:
                          params,
                          layer: Layer,
                          position_xy: tuple[float, float],
+                         pixel_radius: float,
                          context_region_pixel_size_xy: tuple[int, int],
                          attenuation_params: tuple[float, float],
                          noise_bias: float,
@@ -254,20 +258,20 @@ class DiffusionCanvasAPI:
         y_bounds = _get_cropped_1d(int(latent_y), latent_size_xy[1], layer.clean_latent.shape[2])
         x_bounds = _get_cropped_1d(int(latent_x), latent_size_xy[0], layer.clean_latent.shape[3])
 
-        '''mask = self.brushes.draw_dab(
-            torch.zeros_like(self.layer.noise_amplitude),
+        mask = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            self.noise_brush_radius,
-            (1, 1, 1, 1),
+            pixel_radius / 8,
+            (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
             opacity=1,
             mode="blend"
-        ).to(shared.device)'''
+        ).to(shared.device)
 
         for _ in TimeBudget(time_budget):
             layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
                        lambda x: np.maximum(x * (1.0 - attenuation_params[0])
                                             - attenuation_params[1], 0),
-                       brush_mask=None,  # mask,
+                       brush_mask=mask,
                        noise_bias=noise_bias,
                        y_bounds=y_bounds,
                        x_bounds=x_bounds)

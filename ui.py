@@ -470,6 +470,12 @@ class NoiseBrushTool(BaseBrushTool):
             (0.0, 5.0),
             0.01
         )
+        self.slider_denoise_brush_radius = Slider(
+            "Denoise Radius (px)",
+            64,
+            (0, 512),
+            0.1
+        )
         self.slider_denoise_size_x = Slider(
             "Context Width (px)",
             1024,
@@ -503,6 +509,7 @@ class NoiseBrushTool(BaseBrushTool):
 
         sliders_layout.addRow(self.slider_noise_brush_radius.label, self.slider_noise_brush_radius)
         sliders_layout.addRow(self.slider_noise_brush_intensity.label, self.slider_noise_brush_intensity)
+        sliders_layout.addRow(self.slider_denoise_brush_radius.label, self.slider_denoise_brush_radius)
         sliders_layout.addRow(self.slider_denoise_size_x.label, self.slider_denoise_size_x)
         sliders_layout.addRow(self.slider_denoise_size_y.label, self.slider_denoise_size_y)
         sliders_layout.addRow(self.slider_denoise_attenuation.label, self.slider_denoise_attenuation)
@@ -519,13 +526,17 @@ class NoiseBrushTool(BaseBrushTool):
         return self.slider_noise_brush_intensity.value
     noise_brush_intensity = property(_get_noise_brush_intensity)
 
-    def _get_denoise_brush_size_x(self):
-        return self.slider_denoise_size_x.value
-    denoise_brush_size_x = property(_get_denoise_brush_size_x)
+    def _get_denoise_brush_radius(self):
+        return self.slider_denoise_brush_radius.value
+    denoise_brush_radius = property(_get_denoise_brush_radius)
 
-    def _get_denoise_brush_size_y(self):
+    def _get_denoise_context_size_x(self):
+        return self.slider_denoise_size_x.value
+    denoise_context_size_x = property(_get_denoise_context_size_x)
+
+    def _get_denoise_context_size_y(self):
         return self.slider_denoise_size_y.value
-    denoise_brush_size_y = property(_get_denoise_brush_size_y)
+    denoise_context_size_y = property(_get_denoise_context_size_y)
 
     def _get_denoise_attenuation(self):
         return self.slider_denoise_attenuation.value
@@ -562,9 +573,10 @@ class NoiseBrushTool(BaseBrushTool):
             self._api.draw_denoise_dab(layer=layer,
                                        params=params,
                                        position_xy=normalized_mouse_coord,
+                                       pixel_radius=self.denoise_brush_radius,
                                        context_region_pixel_size_xy=(
-                                           self.denoise_brush_size_x,
-                                           self.denoise_brush_size_y
+                                           self.denoise_context_size_x,
+                                           self.denoise_context_size_y
                                        ),
                                        attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
                                        noise_bias=2 ** self.denoise_bias,

@@ -18,6 +18,51 @@ def apply_uniform_maximized_noise(noisy_latent: torch.Tensor,
     return noisy_latent + torch.randn_like(noisy_latent) * added_amplitude, max_amplitude.squeeze().item()
 
 
+@torch.no_grad()
+def apply_uniform_noise(clean_latent: torch.Tensor,
+                        noisy_latent: torch.Tensor,
+                        noise_amplitude: torch.Tensor,
+                        target_noise_amplitude: float) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+    """
+
+    Args:
+        clean_latent (torch.Tensor): The latent without noise.
+        noisy_latent (torch.Tensor): The latent with noise.
+        noise_amplitude (torch.Tensor): The amplitude of the noise signal added to clean latent to get noisy latent.
+        target_noise_amplitude (float): The desired uniform noise level.
+
+    Returns:
+        [0] (torch.Tensor): The latent with uniform noise at the specified amplitude.
+        [1] (torch.Tensor): The noise subtracted from noisy_latent to produce [0].
+        [2] (torch.Tensor): The amplitude of [1].
+
+    """
+    noise_only = noisy_latent - clean_latent
+
+    if target_noise_amplitude <= 0:
+        return clean_latent, noise_only, target_noise_amplitude
+    else:
+        # Remove noise that is above the target amount.
+        attenuation = 1 / torch.clamp(noise_amplitude / target_noise_amplitude, min=1)
+        attenuated_noise = noise_only * attenuation
+        attenuated_amplitude = noise_amplitude * attenuation
+
+        # These values contain the contribution of noise that is above the target amplitude.
+        # Since we are not creating new noise -- there is correlation --
+        # we do not need to use sqrt or squares (arithmetic on variance).
+        subtracted_noise = noise_only - attenuated_noise
+        subtracted_noise_amplitude = noise_amplitude - attenuated_amplitude
+
+        added_noise_amplitude = safe_sqrt(target_noise_amplitude ** 2 - attenuated_amplitude ** 2)
+        added_noise = torch.randn_like(noisy_latent) * added_noise_amplitude
+
+        return (
+            clean_latent + attenuated_noise + added_noise,
+            subtracted_noise,
+            subtracted_noise_amplitude
+        )
+
+
 class Layer:
     def __init__(self, clean_latent, noisy_latent, noise_amplitude):
         assert clean_latent.shape == noisy_latent.shape, \
@@ -123,58 +168,84 @@ class Layer:
         self_noisy_latent = self.noisy_latent[:, :, y_bounds[0]:y_bounds[1], x_bounds[0]:x_bounds[1]]
         self_noise_amplitude = self.noise_amplitude[:, :, y_bounds[0]:y_bounds[1], x_bounds[0]:x_bounds[1]]
 
-        # Add noise to the latent to make it uniform.
-        # Though, when masking is used, some regions are noisier than the "maximum" as they are given less weight.
-        # The noise level which exceeds the maximum is output in "extra_amplitude", or is None when masks are not used.
-        uniform_noisy_latent, max_amplitude = apply_uniform_maximized_noise(
-            self_noisy_latent,
-            self_noise_amplitude)
-
-        # Get the maxed maximum amplitude, which will bias the target noise level towards what the brush is centered
-        # over.
-        max_masked_amplitude = torch.max(
-            self_noise_amplitude * brush_mask
-            if isinstance(brush_mask, torch.Tensor)
-            else self_noise_amplitude
-        ).squeeze().item()
-
-        # Denoise!
-        denoised_latent = denoise(uniform_noisy_latent, max_amplitude * noise_bias)
-
-        # Use the attenuation function to calculate our next maximum noise level.
-        attenuated_max_amplitude: float = attenuation_func(max_masked_amplitude)
-
-        # How much should we blend the noisy and denoised latent together, given the previous
-        # and attenuated noise levels?
-        ratio: float = attenuated_max_amplitude / max_amplitude
-        if math.isnan(ratio) or math.isinf(ratio):
-            ratio = 0
-
-        # Reduce the noise level less for unmasked regions.
-        # The noise level and ratio may become per-latent here.
         if isinstance(brush_mask, torch.Tensor):
-            attenuated_max_amplitude = attenuated_max_amplitude * brush_mask + max_amplitude * (1-brush_mask)
-            ratio = ratio * brush_mask + (1-brush_mask)
+            # Get the maximum noise value after masking.
+            masked_maximum_noise_amplitude = torch.max(self_noise_amplitude * brush_mask).squeeze().item()
 
-        # Re-add noise back in.
-        renoised_latent = uniform_noisy_latent * ratio + denoised_latent * (1-ratio)
+            # Attenuate existing noise, or add new noise, in order to create a uniformly noisy latent.
+            (uniform_noisy_latent, subtracted_noise, subtracted_noise_amplitude) = apply_uniform_noise(
+                clean_latent=self_clean_latent,
+                noisy_latent=self_noisy_latent,
+                noise_amplitude=self_noise_amplitude,
+                target_noise_amplitude=masked_maximum_noise_amplitude
+            )
 
-        # Create a mask for pixels where noise_amplitude exceeds attenuated_max_amplitude
-        mask = self_noise_amplitude > attenuated_max_amplitude  # Shape: (batch_count, 1, height, width)
+            # Denoise!
+            denoised_latent = denoise(uniform_noisy_latent, masked_maximum_noise_amplitude * noise_bias)
 
-        # Broadcast the mask to match the shape of the latent tensors
-        expanded_mask = mask.expand_as(self_noisy_latent)  # Shape: (batch_count, channels, height, width)
+            # Get the fraction of noise to add back in according to our attenuation function.
+            renoise_fraction: float = attenuation_func(masked_maximum_noise_amplitude) / masked_maximum_noise_amplitude
+            if math.isnan(renoise_fraction) or math.isinf(renoise_fraction):
+                renoise_fraction = 0
 
-        # Apply the updates conditionally using the mask
-        self_noisy_latent[expanded_mask] = renoised_latent[expanded_mask].to(self_clean_latent.dtype)
-        self_clean_latent[expanded_mask] = denoised_latent[expanded_mask].to(self_clean_latent.dtype)
+            # Change the fraction so that noise is completely restored for unmasked regions.
+            renoise_fraction: torch.Tensor = renoise_fraction * brush_mask + (1-brush_mask)
 
-        # Update noise_amplitude using the original mask (no need to expand)
-        self_noise_amplitude[mask] = (
-            attenuated_max_amplitude[mask]
-            if isinstance(attenuated_max_amplitude, torch.Tensor)
-            else attenuated_max_amplitude
-        )
+            # Restore the given fraction of noise removed by the denoiser step.
+            renoised_latent: torch.Tensor = (
+                    uniform_noisy_latent * renoise_fraction +
+                    denoised_latent * (1-renoise_fraction)
+            )
+            renoised_amplitude: torch.Tensor = masked_maximum_noise_amplitude * renoise_fraction
+
+            # Restore the noise removed to enforce uniform noise levels.
+            renoised_latent += subtracted_noise
+            renoised_amplitude += subtracted_noise_amplitude
+
+            # Create a mask for pixels where noise_amplitude exceeds attenuated_max_amplitude
+            # Shape: (batch_count, 1, height, width)
+            mask: torch.Tensor = (self_noise_amplitude > renoised_amplitude) & (brush_mask > 0)
+            expanded_mask = mask.expand_as(self_noisy_latent)  # Shape: (batch_count, channels, height, width)
+
+            # Apply the updates conditionally using the mask
+            self_clean_latent[expanded_mask] = denoised_latent[expanded_mask].to(self_clean_latent.dtype)
+            self_noisy_latent[expanded_mask] = renoised_latent[expanded_mask].to(self_noisy_latent.dtype)
+            self_noise_amplitude[mask] = renoised_amplitude[mask].to(self_noise_amplitude.dtype)
+        else:
+            # Add noise to the latent to make it uniform.
+            uniform_noisy_latent, max_amplitude = apply_uniform_maximized_noise(
+                self_noisy_latent,
+                self_noise_amplitude)
+
+            # Denoise!
+            denoised_latent = denoise(uniform_noisy_latent, max_amplitude * noise_bias)
+
+            # Use the attenuation function to calculate our next maximum noise level.
+            attenuated_max_amplitude: float = attenuation_func(max_amplitude)
+
+            # How much should we blend the noisy and denoised latent together, given the previous
+            # and attenuated noise levels?
+            renoise_fraction: float = attenuated_max_amplitude / max_amplitude
+            if math.isnan(renoise_fraction) or math.isinf(renoise_fraction):
+                renoise_fraction = 0
+
+            # Re-add noise back in.
+            renoised_latent = uniform_noisy_latent * renoise_fraction + denoised_latent * (1 - renoise_fraction)
+
+            # Create a mask for pixels where noise_amplitude exceeds attenuated_max_amplitude
+            # Shape: (batch_count, 1, height, width)
+            mask = self_noise_amplitude > attenuated_max_amplitude
+
+            # Broadcast the mask to match the shape of the latent tensors
+            # Shape: (batch_count, channels, height, width)
+            expanded_mask = mask.expand_as(self_noisy_latent)
+
+            # Apply the updates conditionally using the mask
+            self_noisy_latent[expanded_mask] = renoised_latent[expanded_mask].to(self_clean_latent.dtype)
+            self_clean_latent[expanded_mask] = denoised_latent[expanded_mask].to(self_clean_latent.dtype)
+
+            # Update noise_amplitude using the original mask (no need to expand)
+            self_noise_amplitude[mask] = attenuated_max_amplitude
 
         # Copy the values back into the whole tensor.
         # This step may not be needed, but is done to be safe.
