@@ -22,11 +22,11 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QDialog,
     QFileDialog,
-    QMessageBox,
+    QMessageBox, QSizePolicy,
 )
 
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent, QKeyEvent
-from PyQt6.QtCore import Qt, QTimer, QRect, QPointF
+from PyQt6.QtCore import Qt, QTimer, QPoint
 
 import PIL.Image
 import numpy as np
@@ -36,11 +36,92 @@ from PIL import Image
 from sdwebui_interface import pop_intercepted, unfreeze_sd_webui
 from diffusion_canvas_api import DiffusionCanvasAPI
 from layer import History, Layer
+from typing import Callable
 
 from ui_utils import ExceptionCatcher
 from ui_params import ParamsWidget
 from ui_dialogs import NewCanvasDialog
 from ui_brushes import BaseBrushTool, NoiseBrushTool, LatentBrushTool
+
+
+class Canvas(QScrollArea):
+    def __init__(self,
+                 on_mouse_press: Callable[[QMouseEvent], None],
+                 on_mouse_move: Callable[[QMouseEvent], None],
+                 on_mouse_release: Callable[[QMouseEvent], None],
+                 parent: QWidget | None = None):
+        super().__init__(parent)
+
+        self.on_mouse_press = on_mouse_press
+        self.on_mouse_move = on_mouse_move
+        self.on_mouse_release = on_mouse_release
+
+        self.canvas_widget = QWidget(self)
+
+        canvas_layout = QVBoxLayout(self.canvas_widget)
+        canvas_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.canvas_widget.setLayout(canvas_layout)
+
+        self.label = QLabel(self.canvas_widget)
+        canvas_layout.addWidget(self.label)
+
+        self.setWidget(self.canvas_widget)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setMinimumWidth(200)
+        self.setMinimumHeight(200)
+
+    def update_image(self, image: QImage):
+        # Update the label pixmap
+        pixmap = QPixmap.fromImage(image)
+
+        self.label.setPixmap(pixmap)
+        self.label.setFixedWidth(pixmap.width())
+        self.label.setFixedHeight(pixmap.height())
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setMargin(0)
+
+        self.canvas_widget.setMinimumWidth(pixmap.width())
+        self.canvas_widget.setMinimumHeight(pixmap.height())
+
+        size_policy = QSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+
+        self.canvas_widget.setSizePolicy(size_policy)
+
+    def coord_local_to_normalized(self, local_point: QPoint):
+        pixmap: QPixmap = self.label.pixmap()
+
+        if pixmap is None:
+            return 0.5, 0.5
+
+        # Convert the point from our local space to the label's local space.
+        label_local_point = self.label.mapFromGlobal(self.mapToGlobal(local_point))
+
+        # The image is centered, so its top-left (0,0) will be
+        # half the margin outward from the self's top-left (0,0).
+        image_pos = (
+                (self.label.width() - pixmap.width()) / 2,
+                (self.label.height() - pixmap.height()) / 2
+        )
+
+        return (
+            (label_local_point.x() - image_pos[0]) / pixmap.width(),
+            (label_local_point.y() - image_pos[1]) / pixmap.height(),
+        )
+
+    def mousePressEvent(self, event):
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            # self.grabMouse()
+            self.on_mouse_press(event)
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            self.on_mouse_move(event)
+
+    def mouseReleaseEvent(self, event):
+        with ExceptionCatcher(self, "Failed to handle mouse event"):
+            self.on_mouse_release(event)
+            # self.releaseMouse()
 
 
 class DiffusionCanvasWindow(QMainWindow):
@@ -54,23 +135,14 @@ class DiffusionCanvasWindow(QMainWindow):
 
         self.params_widgets: list[ParamsWidget] = []  # List to store params widgets
 
-        self.label = QLabel(self)
+        self.canvas = Canvas(
+            self.canvas_mousePressEvent,
+            self.canvas_mouseMoveEvent,
+            self.canvas_mouseReleaseEvent,
+            self)
 
-        # Central layout setup
-        self.canvas_widget = QWidget()
-        canvas_layout = QVBoxLayout(self.canvas_widget)
-        canvas_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.canvas_widget.setLayout(canvas_layout)
-
-        canvas_scroll_area = QScrollArea()
-        canvas_scroll_area.setWidget(self.canvas_widget)
-        canvas_scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        canvas_scroll_area.setMinimumWidth(200)
-        canvas_scroll_area.setMinimumHeight(200)
-
-        canvas_layout.addWidget(self.label)
-
-        self.setCentralWidget(canvas_scroll_area)
+        # Our canvas is the central widget.
+        self.setCentralWidget(self.canvas)
 
         # Add a menu widget
         menu_widget = QWidget()
@@ -132,13 +204,6 @@ class DiffusionCanvasWindow(QMainWindow):
         tool_settings_dock = QDockWidget("Tool Settings", self)
         tool_settings_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, tool_settings_dock)
-
-        """
-        api,
-        tool_dock_layout: QLayout,
-        tool_settings_dock: QDockWidget,
-        on_tool_button_click: callable
-        """
 
         self.current_tool: BaseBrushTool | None = None
 
@@ -323,7 +388,7 @@ class DiffusionCanvasWindow(QMainWindow):
                 if self.showing_quick_preview:
                     self.update_canvas_view(full=True)
 
-    def mousePressEvent(self, event):
+    def canvas_mousePressEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle mouse event"):
             button = event.button()
             if button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
@@ -331,12 +396,12 @@ class DiffusionCanvasWindow(QMainWindow):
                 self.drag_button = button
                 self.apply_brush(event)
 
-    def mouseMoveEvent(self, event):
+    def canvas_mouseMoveEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle mouse event"):
             if self.is_dragging:
                 self.apply_brush(event)
 
-    def mouseReleaseEvent(self, event):
+    def canvas_mouseReleaseEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle mouse event"):
             if event.button() == self.drag_button:
                 self.is_dragging = False
@@ -349,21 +414,7 @@ class DiffusionCanvasWindow(QMainWindow):
         if self.current_tool is None:
             return
 
-        pixmap: QPixmap = self.label.pixmap()
-        mouse_pos = event.globalPosition()
-        image_rect: QRect = pixmap.rect()
-        image_pos = self.label.mapToGlobal(QPointF(image_rect.x(), image_rect.y()))
-
-        normalized_position = (
-            (mouse_pos.x() - image_pos.x()) / pixmap.width(),
-            (mouse_pos.y() - image_pos.y()) / pixmap.height(),
-        )
-
-        # Keep within bounds.
-        if normalized_position[0] < 0 or normalized_position[0] > 1:
-            return
-        if normalized_position[1] < 0 or normalized_position[1] > 1:
-            return
+        normalized_position = self.canvas.coord_local_to_normalized(event.position())
 
         if self.current_tool.brush_stroke_will_modify(layer=self.layer,
                                                       params=self.params,
@@ -432,12 +483,5 @@ class DiffusionCanvasWindow(QMainWindow):
 
         # Convert tensor to QImage
         q_image = self.api.latent_to_image(latent_to_show, full, QImage)
-        pixmap = QPixmap.fromImage(q_image)
 
-        # Update the label pixmap
-        self.label.setPixmap(pixmap)
-        self.label.setFixedWidth(pixmap.width())
-        self.label.setFixedHeight(pixmap.height())
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.canvas_widget.setFixedWidth(pixmap.width() + 20)
-        self.canvas_widget.setFixedHeight(pixmap.height() + 20)
+        self.canvas.update_image(q_image)
