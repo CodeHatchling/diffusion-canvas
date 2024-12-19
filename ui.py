@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QDialog,
     QFileDialog,
-    QMessageBox, QSizePolicy,
+    QMessageBox,
+    QSizePolicy
 )
 
 from PyQt6.QtGui import QPixmap, QImage, QMouseEvent, QKeyEvent
