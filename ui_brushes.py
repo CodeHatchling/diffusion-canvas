@@ -1,3 +1,4 @@
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QLabel,
     QWidget,
@@ -49,6 +50,7 @@ class BaseBrushTool:
                                  layer: Layer,
                                  params,
                                  mouse_button: Qt.MouseButton,
+                                 event: QMouseEvent,
                                  normalized_mouse_coord: (float, float)) -> bool:
         ...
 
@@ -56,6 +58,7 @@ class BaseBrushTool:
                             layer: Layer,
                             params,
                             mouse_button: Qt.MouseButton,
+                            event: QMouseEvent,
                             normalized_mouse_coord: (float, float)):
         ...
 
@@ -77,6 +80,7 @@ class NoiseBrushTool(BaseBrushTool):
 
         # Add a help message:
         sliders_layout.addRow("Left click", QLabel("Add noise"))
+        sliders_layout.addRow("Ctrl+Left click", QLabel("Remove noise"))
         sliders_layout.addRow("Right click", QLabel("Denoise"))
 
         # Add sliders:
@@ -176,6 +180,7 @@ class NoiseBrushTool(BaseBrushTool):
                                  layer: Layer,
                                  params,
                                  mouse_button: Qt.MouseButton,
+                                 event: QMouseEvent,
                                  normalized_mouse_coord: (float, float)) -> bool:
         return mouse_button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton)
 
@@ -183,12 +188,21 @@ class NoiseBrushTool(BaseBrushTool):
                             layer: Layer,
                             params,
                             mouse_button: Qt.MouseButton,
+                            event: QMouseEvent,
                             normalized_mouse_coord: (float, float)):
+        ctrl_modifier = event.modifiers() & Qt.KeyboardModifier.ControlModifier  # Check if Ctrl is held
+
         if mouse_button == Qt.MouseButton.LeftButton:
-            self._api.draw_noise_dab(layer=layer,
-                                     position_xy=normalized_mouse_coord,
-                                     pixel_radius=self.noise_brush_radius,
-                                     noise_intensity=self.noise_brush_intensity)
+            if ctrl_modifier:
+                self._api.draw_remove_noise_dab(layer=layer,
+                                                position_xy=normalized_mouse_coord,
+                                                pixel_radius=self.noise_brush_radius,
+                                                noise_intensity=self.noise_brush_intensity)
+            else:
+                self._api.draw_noise_dab(layer=layer,
+                                         position_xy=normalized_mouse_coord,
+                                         pixel_radius=self.noise_brush_radius,
+                                         noise_intensity=self.noise_brush_intensity)
             self.show_noisy = True
 
         elif mouse_button == Qt.MouseButton.RightButton:
@@ -275,6 +289,7 @@ class LatentBrushTool(BaseBrushTool):
                                  layer: Layer,
                                  params,
                                  mouse_button: Qt.MouseButton,
+                                 event: QMouseEvent,
                                  normalized_mouse_coord: (float, float)) -> bool:
         return mouse_button in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton)
 
@@ -282,6 +297,7 @@ class LatentBrushTool(BaseBrushTool):
                             layer: Layer,
                             params,
                             mouse_button: Qt.MouseButton,
+                            event: QMouseEvent,
                             normalized_mouse_coord: (float, float)):
         if mouse_button == Qt.MouseButton.LeftButton:
             self._api.draw_latent_dab(layer=layer,

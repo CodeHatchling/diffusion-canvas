@@ -227,6 +227,29 @@ class DiffusionCanvasAPI:
         layer.add_noise(amplitude)
 
     @torch.no_grad()
+    def draw_remove_noise_dab(self,
+                              layer: Layer,
+                              position_xy: tuple[float, float],
+                              pixel_radius: float,
+                              noise_intensity: float):
+
+        latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
+            position_xy,
+            layer.noise_amplitude
+        )
+
+        amplitude = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            pixel_radius / 8,
+            (1, 1, 1, 1),
+            opacity=noise_intensity,
+            mode="add"
+        ).to(layer.noise_amplitude.device)
+
+        layer.remove_noise(amplitude)
+
+    @torch.no_grad()
     def draw_denoise_dab(self,
                          params,
                          layer: Layer,

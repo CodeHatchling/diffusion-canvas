@@ -154,6 +154,23 @@ class Layer:
         self.noise_amplitude = safe_sqrt(self.noise_amplitude**2 + amplitude_to_add**2)
 
     @torch.no_grad()
+    def remove_noise(self, desired_amplitude_decrease: torch.Tensor):
+        """
+        Args:
+            desired_amplitude_decrease: How much to decrease the noise amplitude by per latent.
+        """
+        amplitude_after = torch.clamp(self.noise_amplitude - desired_amplitude_decrease, min=0)
+        noise_scale = amplitude_after / self.noise_amplitude
+        noisy_latent_after = self.noisy_latent * noise_scale + self.clean_latent * (1-noise_scale)
+
+        # Mask out modifications of latents without any noise.
+        mask = self.noise_amplitude > 0
+        expanded_mask = mask.expand_as(self.noisy_latent)
+
+        self.noisy_latent[expanded_mask] = noisy_latent_after[expanded_mask]
+        self.noise_amplitude = amplitude_after
+
+    @torch.no_grad()
     def step(self,
              denoise: Callable[[torch.Tensor, float], torch.Tensor],
              attenuation_func: Callable[[float], float],

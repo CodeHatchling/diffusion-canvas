@@ -338,6 +338,7 @@ class DiffusionCanvasWindow(QMainWindow):
         if self.current_tool.brush_stroke_will_modify(layer=self.layer,
                                                       params=self.params,
                                                       mouse_button=self.drag_button,
+                                                      event=event,
                                                       normalized_mouse_coord=normalized_position):
             if self.create_undo:
                 self.history.register_undo()
@@ -346,6 +347,7 @@ class DiffusionCanvasWindow(QMainWindow):
             self.current_tool.handle_brush_stroke(layer=self.layer,
                                                   params=self.params,
                                                   mouse_button=self.drag_button,
+                                                  event=event,
                                                   normalized_mouse_coord=normalized_position)
 
             self.update_canvas_view(noisy=self.current_tool.show_noisy, full=False)
