@@ -14,12 +14,12 @@ import math
 import PIL.Image
 import numpy as np
 import torch
-import texture_convert as conv
+import utils.texture_convert as conv
 from brushes import Brushes
 from layer import Layer
 from sdwebui_interface import encode_image, decode_image, denoise
 import modules.shared as shared
-from time_utils import TimeBudget
+from utils.time_utils import TimeBudget
 from enum import Enum
 
 

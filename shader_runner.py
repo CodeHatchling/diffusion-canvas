@@ -203,8 +203,7 @@ def func():
     '''
 
     from PIL import Image
-    import numpy as np
-    import texture_convert as conv
+    import utils.texture_convert as conv
 
     # Load the image
     input_image = Image.open("C:/Users/yoshi/OneDrive/Pictures/dragon flame club.png").convert('RGBA')
@@ -225,8 +224,8 @@ def func():
         program.run(output_texture)
 
         # Convert the output texture to a PIL image
-        import texture_convert
-        result_image = texture_convert.convert(output_texture, PIL.Image.Image)
+        import utils.texture_convert as conv
+        result_image = conv.convert(output_texture, PIL.Image.Image)
         result_image.show()
 
 

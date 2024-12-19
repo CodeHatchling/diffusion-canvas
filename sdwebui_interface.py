@@ -12,14 +12,21 @@
 # diffusion_canvas_api.py - Contains functions used by the UI
 
 import modules.processing as processing
-from modules.sd_samplers_common import images_tensor_to_samples, samples_to_images_tensor, approximation_indexes, InterruptedException
+import modules.shared as shared
+import modules.scripts as scripts
+from modules.sd_samplers_common import (
+    images_tensor_to_samples,
+    samples_to_images_tensor,
+    approximation_indexes,
+    InterruptedException
+)
 from modules.shared import opts
 from modules import devices
-import modules.shared as shared
+from modules.script_callbacks import BeforeDenoiserForwardParams
+
 import torch
-from modules.script_callbacks import BeforeDenoiserForwardParams, on_before_denoiser_forward
-import modules.scripts as scripts
-from time_utils import Timer
+
+from utils.time_utils import Timer
 
 
 class DenoiserParams:
@@ -70,11 +77,10 @@ def denoise(denoiser: any, latent: torch.Tensor, sigma: float, params: any) -> t
         params.sigma = (params.sigma * 0) + sigma
         our_call = True
 
-        with Timer("denoiser.forward"):
-            with torch.no_grad():
-                dtype = latent.dtype
-                latent = denoiser.forward(latent, params.sigma, params.uncond, params.cond, params.cond_scale, params.s_min_uncond,
-                                        params.image_cond).to(dtype)
+        with Timer("denoiser.forward"), torch.no_grad():
+            dtype = latent.dtype
+            latent = denoiser.forward(latent, params.sigma, params.uncond, params.cond, params.cond_scale, params.s_min_uncond,
+                                    params.image_cond).to(dtype)
 
         our_call = False
         return latent

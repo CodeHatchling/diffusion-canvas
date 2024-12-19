@@ -58,7 +58,6 @@ def launch():
     window = DiffusionCanvasWindow()
     window.show()
     app.exec()
-    unfreeze_sd_webui()
 
     end_interrupt()
     running = False

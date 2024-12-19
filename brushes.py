@@ -10,13 +10,7 @@
 # ui.py - UI for DiffusionCanvas.
 # diffusion_canvas_api.py - Contains functions used by the UI
 
-import PIL
-from PIL import Image
-import torch
-from PyQt6.QtGui import QImage
-import moderngl
-
-import texture_convert as conv
+import utils.texture_convert as conv
 from shader_runner import ShaderRunner, Program, safe_release
 
 sr: ShaderRunner | None = None
@@ -61,18 +55,17 @@ class Brushes:
         self.sr = ShaderRunner()
         self.dab = self.sr.create_program(draw_dab_fragment_shader)
 
-
     def release(self):
         self.sr = safe_release(self.sr)
 
     def draw_dab(self,
-                 image: PIL.Image.Image | torch.Tensor | QImage,
+                 image: conv.supported_types,
                  center: tuple[float, float],
                  radius: float,
                  color: tuple[float, float, float, float],
                  opacity: float = 1,
                  mode: str = "blend") \
-            -> PIL.Image.Image | torch.Tensor | QImage:
+            -> conv.supported_types:
 
         # Create texture from input image
         input_texture = conv.convert_to_moderngl_texture(image, self.sr.create_texture)
@@ -105,4 +98,3 @@ class Brushes:
         self.sr.release_item(input_texture)
         self.sr.release_item(output_texture)
         return output
-
