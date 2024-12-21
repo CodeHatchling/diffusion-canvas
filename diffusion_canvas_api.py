@@ -23,6 +23,9 @@ from utils.time_utils import TimeBudget
 from enum import Enum
 
 
+latent_size_in_pixels: int = 8
+
+
 def _center_crop_for_sd(image: PIL.Image.Image, rounding: int):
     new_width = int(np.floor(image.width / rounding)) * rounding
     new_height = int(np.floor(image.height / rounding)) * rounding
@@ -82,7 +85,7 @@ class DiffusionCanvasAPI:
     @staticmethod
     @torch.no_grad()
     def create_layer_from_image(image: PIL.Image.Image) -> Layer:
-        image = _center_crop_for_sd(image, 8).convert(mode="RGB")
+        image = _center_crop_for_sd(image, latent_size_in_pixels).convert(mode="RGB")
         image_tensor = conv.convert(image, torch.Tensor).to(shared.device)
         encoded = encode_image(image_tensor)
         noise_amp_shape = list(encoded.shape)
@@ -110,7 +113,74 @@ class DiffusionCanvasAPI:
     @torch.no_grad()
     def latent_to_image(latent: torch.Tensor, full_quality: bool, dest_type):
         decoded = decode_image(latent, full_quality)
+
+        if dest_type is None:
+            return decoded
+
         converted = conv.convert(decoded, dest_type)
+        return converted
+
+    @staticmethod
+    @torch.no_grad()
+    def latent_to_image_tiled(latent: torch.Tensor,
+                              max_tile_size_latents: int,
+                              full_quality: bool,
+                              dest_type):
+        latent_size_x = latent.shape[3]
+        tile_count_x = int(np.ceil(latent_size_x / max_tile_size_latents))
+        tile_size_x = int(np.ceil(latent_size_x / tile_count_x))
+        tile_count_x = int(np.ceil(latent_size_x / tile_size_x))
+
+        latent_size_y = latent.shape[2]
+        tile_count_y = int(np.ceil(latent_size_y / max_tile_size_latents))
+        tile_size_y = int(np.ceil(latent_size_y / tile_count_y))
+        tile_count_y = int(np.ceil(latent_size_y / tile_size_y))
+
+        image_tensor_shape = (1, 3, latent_size_y*latent_size_in_pixels, latent_size_x*latent_size_in_pixels)
+        image_tensor = torch.zeros(size=image_tensor_shape, dtype=latent.dtype, device=latent.device)
+
+        for x in range(tile_count_x):
+            x_latent_bounds = (
+                np.clip(x * tile_size_x, a_min=0, a_max=latent_size_x),
+                np.clip((x+1) * tile_size_x, a_min=0, a_max=latent_size_x)
+            )
+            x_image_bounds = (
+                    x_latent_bounds[0] * latent_size_in_pixels,
+                    x_latent_bounds[1] * latent_size_in_pixels
+            )
+
+            for y in range(tile_count_y):
+                y_latent_bounds = (
+                    np.clip(y * tile_size_y, a_min=0, a_max=latent_size_y),
+                    np.clip((y + 1) * tile_size_y, a_min=0, a_max=latent_size_y)
+                )
+                y_image_bounds = (
+                    y_latent_bounds[0] * latent_size_in_pixels,
+                    y_latent_bounds[1] * latent_size_in_pixels
+                )
+
+                latent_view = latent[
+                    :, :,
+                    y_latent_bounds[0]:y_latent_bounds[1],
+                    x_latent_bounds[0]:x_latent_bounds[1]
+                ]
+
+                decoded_view = DiffusionCanvasAPI.latent_to_image(
+                    latent_view,
+                    full_quality,
+                    dest_type=None
+                )
+
+                image_tensor[
+                    :, :,
+                    y_image_bounds[0]:y_image_bounds[1],
+                    x_image_bounds[0]:x_image_bounds[1]
+                ] = decoded_view
+
+        if dest_type is None:
+            return image_tensor
+
+        converted = conv.convert(image_tensor, dest_type)
         return converted
 
     def set_denoiser(self, denoiser):
@@ -118,8 +188,8 @@ class DiffusionCanvasAPI:
 
     @torch.no_grad()
     def generate_image(self, width: int, height: int, steps: int, params: any) -> torch.Tensor:
-        width = int(np.maximum(1, np.ceil(width / 8)))
-        height = int(np.maximum(1, np.ceil(height / 8)))
+        width = int(np.maximum(1, np.ceil(width / latent_size_in_pixels)))
+        height = int(np.maximum(1, np.ceil(height / latent_size_in_pixels)))
 
         sigma = 20
         latent = torch.randn(size=(1, 4, height, width), dtype=torch.float32, device=shared.device) * sigma
@@ -157,7 +227,7 @@ class DiffusionCanvasAPI:
         alpha = self._brushes.draw_dab(
             torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            pixel_radius / 8,
+            pixel_radius / latent_size_in_pixels,
             (1, 1, 1, 1),
             opacity=opacity,
             mode="blend"
@@ -195,7 +265,7 @@ class DiffusionCanvasAPI:
         weight = self._brushes.draw_dab(
             torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            pixel_radius / 8,
+            pixel_radius / latent_size_in_pixels,
             (1, 1, 1, 1),
             opacity=1,
             mode="blend"
@@ -218,7 +288,7 @@ class DiffusionCanvasAPI:
         amplitude = self._brushes.draw_dab(
             torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            pixel_radius / 8,
+            pixel_radius / latent_size_in_pixels,
             (1, 1, 1, 1),
             opacity=noise_intensity,
             mode="add"
@@ -241,7 +311,7 @@ class DiffusionCanvasAPI:
         amplitude = self._brushes.draw_dab(
             torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            pixel_radius / 8,
+            pixel_radius / latent_size_in_pixels,
             (1, 1, 1, 1),
             opacity=noise_intensity,
             mode="add"
@@ -269,8 +339,8 @@ class DiffusionCanvasAPI:
             return
 
         latent_size_xy = (
-            np.maximum(int(math.ceil(context_region_pixel_size_xy[0] / 8)), 8),
-            np.maximum(int(math.ceil(context_region_pixel_size_xy[1] / 8)), 8)
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[0] / latent_size_in_pixels)), latent_size_in_pixels),
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[1] / latent_size_in_pixels)), latent_size_in_pixels)
         )
 
         latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
@@ -284,7 +354,7 @@ class DiffusionCanvasAPI:
         mask = self._brushes.draw_dab(
             torch.zeros_like(layer.noise_amplitude),
             (latent_x, latent_y_flipped),
-            pixel_radius / 8,
+            pixel_radius / latent_size_in_pixels,
             (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
             opacity=1,
             mode="blend"
