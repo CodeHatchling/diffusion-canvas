@@ -403,6 +403,13 @@ class DiffusionCanvasWindow(QMainWindow):
             self.showing_quick_preview = False
 
         # Convert tensor to QImage
-        q_image = self.api.latent_to_image_tiled(latent_to_show, 64, full, QImage)
+        q_image = self.api.latent_to_image_tiled(
+            latent_to_show,
+            max_tile_size_latents=64,
+            overlap_size_latents=8,
+            margin_size_latents=4,
+            full_quality=full,
+            dest_type=QImage
+        )
 
         self.canvas.update_image(q_image)

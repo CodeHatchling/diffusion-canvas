@@ -72,6 +72,335 @@ def _position_to_latent_coords(position_xy: tuple[float, float],
     return latent_x, latent_y, latent_y_flipped
 
 
+cache = {}
+
+
+def compute_tile_count(total_size, max_tile_size, margin_size, overlap_size) -> int:
+    extra = margin_size * 2 + overlap_size
+
+    def solve():
+        if extra <= 0:
+            return total_size / max_tile_size
+
+        term1 = extra + max_tile_size
+
+        term2 = (
+                + extra * extra
+                + 2 * extra * max_tile_size
+                + max_tile_size * max_tile_size
+                - 4 * extra * total_size
+        )
+
+        if term2 < 0:
+            return total_size / max_tile_size
+
+        term2 = term2 ** 0.5
+        term3 = 2 * extra
+
+        solution = (term1 - term2) / term3
+
+        if solution < 0:
+            return total_size / max_tile_size
+
+        return solution
+
+    return int(np.ceil(solve()))
+
+
+def get_corrected_bounds_1d(bounds: tuple[int, int]) -> tuple[int, int]:
+    if bounds[0] >= bounds[1]:
+        average = (bounds[0] + bounds[1]) / 2
+        return (
+            int(np.floor(average)),
+            int(np.ceil(average))
+        )
+    else:
+        return bounds
+
+
+def get_expanded_bounds_1d(bounds: tuple[int, int], expand_amount: tuple[int, int] | int) -> tuple[int, int]:
+    if expand_amount == 0:
+        return bounds
+
+    if isinstance(expand_amount, int):
+        return get_corrected_bounds_1d((
+            bounds[0] - expand_amount,
+            bounds[1] + expand_amount
+        ))
+    else:
+        return get_corrected_bounds_1d((
+            bounds[0] - expand_amount[0],
+            bounds[1] + expand_amount[1]
+        ))
+
+
+def get_clipped_coord_1d(coord: int, clip: tuple[int, int]) -> int:
+    if coord < clip[0]:
+        coord = clip[0]
+    if coord > clip[1]:
+        coord = clip[1]
+    return coord
+
+
+def get_clipped_bounds_1d(bounds: tuple[int, int], clip: tuple[int, int]) -> tuple[int, int]:
+    min_clipping_range = (clip[0], clip[1] - 1)
+    max_clipping_range = (clip[0] + 1, clip[1])
+
+    return (
+        get_clipped_coord_1d(bounds[0], min_clipping_range),
+        get_clipped_coord_1d(bounds[1], max_clipping_range)
+    )
+
+
+def get_offset_bounds_1d(bounds: tuple[int, int], offset: int) -> tuple[int, int]:
+    return (
+        bounds[0] + offset,
+        bounds[1] + offset
+    )
+
+
+class Bounds:
+    x_bounds: tuple[int, int]
+    y_bounds: tuple[int, int]
+
+    def __init__(self, x_bounds: tuple[int, int], y_bounds: tuple[int, int]):
+        self.x_bounds = get_corrected_bounds_1d(x_bounds)
+        self.y_bounds = get_corrected_bounds_1d(y_bounds)
+
+    def get_expanded(self, expand_amount_x: tuple[int, int] | int, expand_amount_y: tuple[int, int] | int):
+        return Bounds(
+            get_expanded_bounds_1d(self.x_bounds, expand_amount_x),
+            get_expanded_bounds_1d(self.y_bounds, expand_amount_y)
+        )
+
+    def get_clipped(self, clip: 'Bounds') -> 'Bounds':
+        return Bounds(
+            get_clipped_bounds_1d(self.x_bounds, clip.x_bounds),
+            get_clipped_bounds_1d(self.y_bounds, clip.y_bounds)
+        )
+
+    def transform_bounds(self, other: 'Bounds'):
+        return Bounds(
+            get_offset_bounds_1d(other.x_bounds, -self.x_bounds[0]),
+            get_offset_bounds_1d(other.y_bounds, -self.y_bounds[0]),
+        )
+
+
+class TileMap:
+    latent_tile_bounds_x: list[tuple[int, int]]
+    latent_tile_bounds_y: list[tuple[int, int]]
+    latent_tile_bounds_with_margins_x: list[tuple[int, int]]
+    latent_tile_bounds_with_margins_y: list[tuple[int, int]]
+    tile_count: tuple[int, int]
+
+    def __init__(self,
+                 latent_size: tuple[int, int],
+                 max_tile_size_latents: int,
+                 margin_size_latents: int,
+                 overlap_size_latents: int):
+
+        self.tile_count = (
+            compute_tile_count(
+                latent_size[0],
+                max_tile_size_latents,
+                margin_size_latents,
+                overlap_size_latents
+            ),
+            compute_tile_count(
+                latent_size[1],
+                max_tile_size_latents,
+                margin_size_latents,
+                overlap_size_latents
+            ),
+        )
+
+        def compute_boundaries(size, divisions) -> list[int]:
+            d: list[int] = []
+            gap_size = size / divisions
+            for _i in range(divisions):
+                d.append(int(np.round(_i * gap_size)))
+            d.append(size)
+            return d
+
+        boundaries_x: list[int] = compute_boundaries(latent_size[0], self.tile_count[0])
+        boundaries_y: list[int] = compute_boundaries(latent_size[1], self.tile_count[1])
+
+        half_overlap = overlap_size_latents / 2
+        min_expand = int(np.floor(half_overlap))
+        max_expand = int(np.ceil(half_overlap))
+
+        self.latent_tile_bounds_x = []
+        self.latent_tile_bounds_with_margins_x = []
+        for i in range(self.tile_count[0]):
+            self.latent_tile_bounds_x.append((
+                boundaries_x[i] - (min_expand if (i > 0) else 0),
+                boundaries_x[i + 1] + (max_expand if ((i + 1) < self.tile_count[0]) else 0)
+            ))
+            self.latent_tile_bounds_with_margins_x.append((
+                boundaries_x[i] - ((min_expand + margin_size_latents) if (i > 0) else 0),
+                boundaries_x[i + 1] + ((max_expand + margin_size_latents) if ((i + 1) < self.tile_count[0]) else 0)
+            ))
+
+        self.latent_tile_bounds_y = []
+        self.latent_tile_bounds_with_margins_y = []
+        for i in range(self.tile_count[1]):
+            self.latent_tile_bounds_y.append((
+                boundaries_y[i] - (min_expand if (i > 0) else 0),
+                boundaries_y[i + 1] + (max_expand if ((i + 1) < self.tile_count[1]) else 0)
+            ))
+            self.latent_tile_bounds_with_margins_y.append((
+                boundaries_y[i] - ((min_expand + margin_size_latents) if (i > 0) else 0),
+                boundaries_y[i + 1] + ((max_expand + margin_size_latents) if ((i + 1) < self.tile_count[1]) else 0)
+            ))
+
+    def get_bounds(self, tile_coord: tuple[int, int], include_margins: bool):
+        bounds_array_x = (
+            self.latent_tile_bounds_with_margins_x
+            if include_margins
+            else self.latent_tile_bounds_x
+        )
+        bounds_array_y = (
+            self.latent_tile_bounds_with_margins_y
+            if include_margins
+            else self.latent_tile_bounds_y
+        )
+
+        bounds_x = bounds_array_x[tile_coord[0]]
+        bounds_y = bounds_array_y[tile_coord[1]]
+
+        return Bounds(bounds_x, bounds_y)
+
+    def calculate_weights(self, coord: float, vertical: bool) -> list[float]:
+        bounds_list = self.latent_tile_bounds_y if vertical else self.latent_tile_bounds_x
+
+        def enforce_01(value: float, default: float):
+            if math.isnan(value):
+                return default
+            elif value > 1:
+                return 1
+            elif value < 0:
+                return 0
+            else:
+                return value
+
+        def calculate_raw_weight(tile_index):
+            bounds = bounds_list[tile_index]
+
+            start = bounds[0]
+            end = bounds[1]
+            middle = (start + end) * 0.5
+
+            if coord < start:
+                return 0
+            if coord > end:
+                return 0
+
+            if coord < middle:
+                value = (coord - start) / (middle - start)
+            else:
+                value = 1 - ((coord - middle) / (end - middle))
+
+            return enforce_01(value, 0.5)
+
+        weight_total: float = 0
+        weights_list: list[float] = []
+
+        for i in range(len(bounds_list)):
+            weight = calculate_raw_weight(i)
+            weight_total += weight
+            weights_list.append(weight)
+
+        default_value = 1 / len(bounds_list)
+        for i in range(len(bounds_list)):
+            weights_list[i] = (
+                default_value
+                if weight_total == 0
+                else enforce_01(weights_list[i] / weight_total, default_value)
+            )
+
+        return weights_list
+
+
+def create_mask_tensors(tilemap: TileMap, latent_size: int, pixel_size: int, vertical: bool, dtype, device) \
+        -> list[torch.Tensor]:
+    tile_count = tilemap.tile_count[1] if vertical else tilemap.tile_count[0]
+
+    arrays: list[np.array] = []
+
+    for _ in range(tile_count):
+        arrays.append(np.empty(pixel_size, dtype=np.float32))
+
+    pixel_to_latent = latent_size / pixel_size
+
+    for pixel_index in range(pixel_size):
+        # We add a slight offset because we want to sample in the middle of the latent.
+        weights = tilemap.calculate_weights((pixel_index + 0.5) * pixel_to_latent, vertical)
+        for tile_index in range(tile_count):
+            arrays[tile_index][pixel_index] = weights[tile_index]
+
+    tensors: list[torch.Tensor] = []
+
+    for i in range(tile_count):
+        tensor = torch.from_numpy(arrays[i])
+
+        if vertical:
+            tensor = tensor.view(1, 1, -1, 1)
+        else:
+            tensor = tensor.view(1, 1, 1, -1)
+
+        tensor = tensor.to(dtype=dtype, device=device)
+
+        tensors.append(tensor)
+
+    return tensors
+
+
+def get_or_create(_latent_size: tuple[int, int],
+                  dtype, device,
+                  _max_tile_size_latents: int,
+                  _margin_size_latents: int,
+                  _overlap_size_latents: int):
+    key = (_latent_size, dtype, device, _max_tile_size_latents, _margin_size_latents, _overlap_size_latents)
+
+    if key in cache:
+        return cache[key]
+
+    _tilemap = TileMap(
+        latent_size=_latent_size,
+        max_tile_size_latents=_max_tile_size_latents,
+        margin_size_latents=_margin_size_latents,
+        overlap_size_latents=_overlap_size_latents
+    )
+
+    # Broadcastable masks.
+    _h_pixel_masks = create_mask_tensors(
+        tilemap=_tilemap,
+        latent_size=_latent_size[0],
+        pixel_size=_latent_size[0] * latent_size_in_pixels,
+        vertical=False,
+        dtype=dtype,
+        device=device,
+    )
+
+    _v_pixel_masks = create_mask_tensors(
+        tilemap=_tilemap,
+        latent_size=_latent_size[1],
+        pixel_size=_latent_size[1] * latent_size_in_pixels,
+        vertical=True,
+        dtype=dtype,
+        device=device,
+    )
+
+    value = (
+        _tilemap,
+        _h_pixel_masks,
+        _v_pixel_masks
+    )
+
+    cache[key] = value
+    return value
+
+
 class DiffusionCanvasAPI:
     class BlendMode(Enum):
         Blend = 0
@@ -124,45 +453,32 @@ class DiffusionCanvasAPI:
     @torch.no_grad()
     def latent_to_image_tiled(latent: torch.Tensor,
                               max_tile_size_latents: int,
+                              margin_size_latents: int,
+                              overlap_size_latents: int,
                               full_quality: bool,
                               dest_type):
-        latent_size_x = latent.shape[3]
-        tile_count_x = int(np.ceil(latent_size_x / max_tile_size_latents))
-        tile_size_x = int(np.ceil(latent_size_x / tile_count_x))
-        tile_count_x = int(np.ceil(latent_size_x / tile_size_x))
 
-        latent_size_y = latent.shape[2]
-        tile_count_y = int(np.ceil(latent_size_y / max_tile_size_latents))
-        tile_size_y = int(np.ceil(latent_size_y / tile_count_y))
-        tile_count_y = int(np.ceil(latent_size_y / tile_size_y))
-
-        image_tensor_shape = (1, 3, latent_size_y*latent_size_in_pixels, latent_size_x*latent_size_in_pixels)
+        latent_size = (latent.shape[3], latent.shape[2])
+        image_tensor_shape = (1, 3, latent_size[1] * latent_size_in_pixels, latent_size[0] * latent_size_in_pixels)
         image_tensor = torch.zeros(size=image_tensor_shape, dtype=latent.dtype, device=latent.device)
 
-        for x in range(tile_count_x):
-            x_latent_bounds = (
-                np.clip(x * tile_size_x, a_min=0, a_max=latent_size_x),
-                np.clip((x+1) * tile_size_x, a_min=0, a_max=latent_size_x)
-            )
-            x_image_bounds = (
-                    x_latent_bounds[0] * latent_size_in_pixels,
-                    x_latent_bounds[1] * latent_size_in_pixels
-            )
+        tilemap, h_pixel_masks, v_pixel_masks = get_or_create(
+            _latent_size=latent_size,
+            _max_tile_size_latents=max_tile_size_latents,
+            _margin_size_latents=margin_size_latents,
+            _overlap_size_latents=overlap_size_latents,
+            dtype=latent.dtype,
+            device=latent.device
+        )
 
-            for y in range(tile_count_y):
-                y_latent_bounds = (
-                    np.clip(y * tile_size_y, a_min=0, a_max=latent_size_y),
-                    np.clip((y + 1) * tile_size_y, a_min=0, a_max=latent_size_y)
-                )
-                y_image_bounds = (
-                    y_latent_bounds[0] * latent_size_in_pixels,
-                    y_latent_bounds[1] * latent_size_in_pixels
-                )
+        for x in range(tilemap.tile_count[0]):
+            for y in range(tilemap.tile_count[1]):
+                bounds_with_margins = tilemap.get_bounds((x, y), include_margins=True)
 
                 latent_view = latent[
                     :, :,
-                    y_latent_bounds[0]:y_latent_bounds[1],
-                    x_latent_bounds[0]:x_latent_bounds[1]
+                    bounds_with_margins.y_bounds[0]:bounds_with_margins.y_bounds[1],
+                    bounds_with_margins.x_bounds[0]:bounds_with_margins.x_bounds[1]
                 ]
 
                 decoded_view = DiffusionCanvasAPI.latent_to_image(
@@ -171,11 +487,45 @@ class DiffusionCanvasAPI:
                     dest_type=None
                 )
 
+                bounds_without_margins = tilemap.get_bounds((x, y), include_margins=False)
+                relative_bounds = bounds_with_margins.transform_bounds(bounds_without_margins)
+                trimmed_decoded_view = decoded_view[
+                    :, :,
+
+                    relative_bounds.y_bounds[0] * latent_size_in_pixels:
+                    relative_bounds.y_bounds[1] * latent_size_in_pixels,
+
+                    relative_bounds.x_bounds[0] * latent_size_in_pixels:
+                    relative_bounds.x_bounds[1] * latent_size_in_pixels
+                ]
+
+                trimmed_decoded_view *= h_pixel_masks[x][
+                    :, :,
+
+                    :,
+
+                    bounds_without_margins.x_bounds[0] * latent_size_in_pixels:
+                    bounds_without_margins.x_bounds[1] * latent_size_in_pixels
+                ]
+
+                trimmed_decoded_view *= v_pixel_masks[y][
+                    :, :,
+
+                    bounds_without_margins.y_bounds[0] * latent_size_in_pixels:
+                    bounds_without_margins.y_bounds[1] * latent_size_in_pixels,
+
+                    :
+                ]
+
                 image_tensor[
                     :, :,
-                    y_image_bounds[0]:y_image_bounds[1],
-                    x_image_bounds[0]:x_image_bounds[1]
-                ] = decoded_view
+
+                    bounds_without_margins.y_bounds[0] * latent_size_in_pixels:
+                    bounds_without_margins.y_bounds[1] * latent_size_in_pixels,
+
+                    bounds_without_margins.x_bounds[0] * latent_size_in_pixels:
+                    bounds_without_margins.x_bounds[1] * latent_size_in_pixels
+                ] += trimmed_decoded_view
 
         if dest_type is None:
             return image_tensor
