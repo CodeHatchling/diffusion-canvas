@@ -32,7 +32,7 @@ import torch
 from PIL import Image
 
 from sdwebui_interface import pop_intercepted, unfreeze_sd_webui
-from diffusion_canvas_api import DiffusionCanvasAPI
+from diffusion_canvas_api import DiffusionCanvasAPI, latent_size_in_pixels
 from layer import History, Layer
 
 from ui_utils import ExceptionCatcher
@@ -45,6 +45,13 @@ from common import *
 
 
 class DiffusionCanvasWindow(QMainWindow):
+    canvas_image_tensor: torch.Tensor | None
+    show_noisy: bool
+    dirty_region_full: Bounds2D | None
+    dirty_region_quick: Bounds2D | None
+    history: History
+    create_undo: bool
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Diffusion Canvas")
@@ -55,14 +62,14 @@ class DiffusionCanvasWindow(QMainWindow):
 
         self.params_widgets: list[ParamsWidget] = []  # List to store params widgets
 
-        self.canvas = Canvas(
+        self.canvas_view = Canvas(
             self.canvas_mousePressEvent,
             self.canvas_mouseMoveEvent,
             self.canvas_mouseReleaseEvent,
             self)
 
         # Our canvas is the central widget.
-        self.setCentralWidget(self.canvas)
+        self.setCentralWidget(self.canvas_view)
 
         # Add a menu widget
         menu_widget = QWidget()
@@ -159,14 +166,18 @@ class DiffusionCanvasWindow(QMainWindow):
         self.is_dragging = False
         self.drag_button = None
 
+        self.initialize_canvas(self.api.create_empty_layer(512//latent_size_in_pixels, 512//latent_size_in_pixels))
+
+    def initialize_canvas(self, layer: Layer):
         self.show_noisy = False
         self.dirty_region_full: Bounds2D | None = None
         self.dirty_region_quick: Bounds2D | None = None
-
-        self.history = History(self.api.create_empty_layer(512//8, 512//8))
+        self.canvas_image_tensor = None
+        self.history = History(layer)
         self.create_undo = True
 
-        self.update_canvas_view(noisy=False, full=False)
+        # Update the display with the new canvas
+        self.update_canvas_view(noisy=False, full=True)
 
     def closeEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle close event"):
@@ -211,16 +222,13 @@ class DiffusionCanvasWindow(QMainWindow):
                 # Round up to the nearest whole number of latents.
                 # (1x1 latent = 8x8 pixels)
                 latent_size_xy: tuple[int, int] = (
-                    int(np.maximum(np.ceil(width / 8), 1)),
-                    int(np.maximum(np.ceil(height / 8), 1))
+                    int(np.maximum(np.ceil(width / latent_size_in_pixels), 1)),
+                    int(np.maximum(np.ceil(height / latent_size_in_pixels), 1))
                 )
 
-                # Create a new latent layer with the specified dimensions
-                self.history = History(self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1]))
-                self.create_undo = True
+                # Initialize the canvas with a new latent layer with the specified dimensions
+                self.initialize_canvas(self.api.create_empty_layer(latent_size_xy[0], latent_size_xy[1]))
 
-                # Update the display with the new blank canvas
-                self.update_canvas_view(noisy=False, full=True)
                 print(f"New canvas created with dimensions: {width}x{height}")
 
     def on_clicked_load(self):
@@ -241,11 +249,8 @@ class DiffusionCanvasWindow(QMainWindow):
                 margin_size_latents=4,
                 overlap_size_latents=8
             )
-            self.history = History(layer)
-            self.create_undo = True
 
-            # Redraw the canvas
-            self.update_canvas_view(noisy=False, full=True)
+            self.initialize_canvas(layer)
 
     def on_clicked_save(self):
         """
@@ -350,7 +355,7 @@ class DiffusionCanvasWindow(QMainWindow):
         if self.current_tool is None:
             return
 
-        normalized_position = self.canvas.coord_local_to_normalized(event.position())
+        normalized_position = self.canvas_view.coord_local_to_normalized(event.position())
 
         if self.current_tool.brush_stroke_will_modify(layer=self.layer,
                                                       params=self.params,
@@ -406,6 +411,9 @@ class DiffusionCanvasWindow(QMainWindow):
 
     def update_canvas_view(self, noisy: bool | None = None, modified_bounds: Bounds2D | None = None, full: bool = True):
 
+        from utils.time_utils import Timer
+        import utils.texture_convert as conv
+
         if isinstance(noisy, bool):
             self.show_noisy = noisy
 
@@ -448,49 +456,34 @@ class DiffusionCanvasWindow(QMainWindow):
         )
 
         # Expand the region to account for VAE artifacts at edges
-        region_to_redraw = region_to_redraw.get_expanded(expand_amount_x=4, expand_amount_y=4)
+        region_to_redraw_with_padding = region_to_redraw.get_expanded(expand_amount_x=4, expand_amount_y=4)
 
-        # Limit the region to the actual canvas.
+        # Limit the regions to the actual canvas.
         region_to_redraw = region_to_redraw.get_clipped(full_bounds)
+        region_to_redraw_with_padding = region_to_redraw_with_padding.get_clipped(full_bounds)
 
-        def full_decode():
-            # Convert tensor to QImage
-            img = self.api.latent_to_image_tiled(
+        if region_to_redraw_with_padding == full_bounds or self.canvas_image_tensor is None:
+            self.canvas_image_tensor = self.api.latent_to_image_tiled(
                 latent_to_show,
                 max_tile_size_latents=64,
                 overlap_size_latents=8,
                 margin_size_latents=4,
                 full_quality=full,
-                dest_type=QImage
+                dest_type=None
             )
-            self.canvas.update_image(img)
-
-        if region_to_redraw == full_bounds:
-            full_decode()
         else:
-            import utils.texture_convert as conv
             from diffusion_canvas_api import latent_size_in_pixels
-            q_image = self.canvas.get_q_image()
 
-            canvas_pixel_size_xy = (
-                latent_to_show.shape[3] * latent_size_in_pixels,
-                latent_to_show.shape[2] * latent_size_in_pixels
-            )
-
-            if q_image.width() != canvas_pixel_size_xy[0] or q_image.height() != canvas_pixel_size_xy[0]:
-                q_image = None
-
-            if q_image is None:
-                full_decode()
-            else:
-                full_image_latent = conv.convert(q_image, torch.Tensor)
-
+            with Timer("Create Latent View"):
                 latent_view = latent_to_show[
                     :, :,
-                    region_to_redraw.y_bounds[0]:region_to_redraw.y_bounds[1],
-                    region_to_redraw.x_bounds[0]:region_to_redraw.x_bounds[1],
+                    region_to_redraw_with_padding.y_bounds[0]:
+                    region_to_redraw_with_padding.y_bounds[1],
+                    region_to_redraw_with_padding.x_bounds[0]:
+                    region_to_redraw_with_padding.x_bounds[1],
                 ]
 
+            with Timer("Decode"):
                 decoded = self.api.latent_to_image_tiled(
                     latent_view,
                     max_tile_size_latents=64,
@@ -500,17 +493,30 @@ class DiffusionCanvasWindow(QMainWindow):
                     dest_type=None
                 )
 
-                full_image_latent[
+            # Trim the margins from the decoded view as they usually contain artifacts.
+            relative_bounds = region_to_redraw_with_padding.transform_bounds(region_to_redraw)
+            decoded_trimmed = decoded[
+                :, :,
+                relative_bounds.y_bounds[0] * latent_size_in_pixels:
+                relative_bounds.y_bounds[1] * latent_size_in_pixels,
+                relative_bounds.x_bounds[0] * latent_size_in_pixels:
+                relative_bounds.x_bounds[1] * latent_size_in_pixels,
+            ]
+
+            with Timer("Write to Image Tensor"):
+                self.canvas_image_tensor[
                     :, :,
                     region_to_redraw.y_bounds[0] * latent_size_in_pixels:
                     region_to_redraw.y_bounds[1] * latent_size_in_pixels,
                     region_to_redraw.x_bounds[0] * latent_size_in_pixels:
                     region_to_redraw.x_bounds[1] * latent_size_in_pixels
-                ] = decoded
+                ] = decoded_trimmed
 
-                q_image = conv.convert(full_image_latent, QImage)
+        with Timer("Convert to QImage"):
+            q_image = conv.convert(self.canvas_image_tensor, QImage)
 
-                self.canvas.update_image(q_image)
+        with Timer("Update Canvas"):
+            self.canvas_view.update_image(q_image)
 
         if full:
             self.dirty_region_full = None
