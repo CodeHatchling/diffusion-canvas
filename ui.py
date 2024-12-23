@@ -45,7 +45,9 @@ from common import *
 
 
 class DiffusionCanvasWindow(QMainWindow):
-    canvas_image_tensor: torch.Tensor | None
+    gpu_canvas_image_tensor: torch.Tensor | None
+    cpu_canvas_image_tensor: torch.Tensor
+    cpu_canvas_q_image: QImage
     show_noisy: bool
     dirty_region_full: Bounds2D | None
     dirty_region_quick: Bounds2D | None
@@ -172,12 +174,73 @@ class DiffusionCanvasWindow(QMainWindow):
         self.show_noisy = False
         self.dirty_region_full: Bounds2D | None = None
         self.dirty_region_quick: Bounds2D | None = None
-        self.canvas_image_tensor = None
+        self.gpu_canvas_image_tensor = None
+
+        image_size = (
+            layer.clean_latent.shape[2] * latent_size_in_pixels,
+            layer.clean_latent.shape[3] * latent_size_in_pixels
+        )
+
+        # Create a numpy array as the backing store
+        numpy_buffer = np.zeros((image_size[0], image_size[1], 4), dtype=np.uint8)  # RGBA format
+
+        # Create a QImage using the numpy buffer
+        self.cpu_canvas_q_image = QImage(
+            numpy_buffer.data,  # Pointer to the data
+            image_size[1],  # width
+            image_size[0],  # height
+            QImage.Format.Format_RGB32  # Format
+        )
+
+        # Create a PyTorch tensor that shares the same memory
+        self.cpu_canvas_image_tensor = torch.from_numpy(numpy_buffer)
+
         self.history = History(layer)
         self.create_undo = True
 
         # Update the display with the new canvas
         self.update_canvas_view(noisy=False, full=True)
+
+    @staticmethod
+    @torch.no_grad()
+    def _get_cpu_image_tensor(tensor: torch.Tensor, add_alpha: bool = True):
+        """
+        Convert a tensor from the format used by stable diffusion VAE decoders
+        to a format used by QImage.
+
+        Args:
+            tensor (torch.Tensor): Input tensor with shape (1, 3, height, width).
+            add_alpha (bool): Whether to add a dummy alpha channel for QImage Format_RGB32.
+
+        Returns:
+            torch.Tensor: Tensor with shape (height, width, 4) or (height, width, 3).
+        """
+        # Ensure batch size is 1 and remove it
+        assert tensor.shape[0] == 1, "Tensor batch size must be 1."
+
+        tensor = tensor.squeeze(0)  # Shape: (RGB, height, width)
+
+        # Rearrange channels to BGR if needed for QImage
+        tensor = tensor[[2, 1, 0], :, :]  # Shape: (BGR, height, width)
+
+        # Permute to (height, width, channels)
+        tensor = tensor.permute(1, 2, 0)  # Shape: (height, width, BGR)
+
+        # Map and clamp range (0, 1) to (0, 255)
+        tensor = (tensor * 255).clamp(0, 255)
+
+        # Add a dummy alpha channel if required
+        if add_alpha:
+            alpha_channel = torch.full(
+                (tensor.shape[0], tensor.shape[1], 1),
+                255,
+                dtype=tensor.dtype,  # Match dtype of tensor (still likely float16 or float32)
+                device=tensor.device
+            )
+            tensor = torch.cat((tensor, alpha_channel), dim=2)  # Shape: (height, width, BGRA)
+
+        # Convert to uint8 on the CPU as the final step
+        return tensor.to(dtype=torch.uint8, device='cpu')
 
     def closeEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle close event"):
@@ -327,7 +390,7 @@ class DiffusionCanvasWindow(QMainWindow):
                 self.full_preview_timer = 0
 
                 if self.showing_quick_preview:
-                    self.update_canvas_view(full=True)
+                    self.update_canvas_view(full=True, region=None)
 
     def canvas_mousePressEvent(self, event):
         with ExceptionCatcher(self, "Failed to handle mouse event"):
@@ -374,7 +437,7 @@ class DiffusionCanvasWindow(QMainWindow):
                 normalized_mouse_coord=normalized_position
             )
 
-            self.update_canvas_view(noisy=result.show_noisy, modified_bounds=result.modified_bounds, full=False)
+            self.update_canvas_view(noisy=result.show_noisy, region=result.modified_bounds, full=False)
 
     def keyPressEvent(self, event: QKeyEvent):
         with ExceptionCatcher(self, "Failed to handle key press event"):
@@ -409,10 +472,9 @@ class DiffusionCanvasWindow(QMainWindow):
             self.history.redo(1)
             self.update_canvas_view(full=False)
 
-    def update_canvas_view(self, noisy: bool | None = None, modified_bounds: Bounds2D | None = None, full: bool = True):
+    def update_canvas_view(self, noisy: bool | None = None, region: Bounds2D | str | None = 'all', full: bool = True):
 
         from utils.time_utils import Timer
-        import utils.texture_convert as conv
 
         if isinstance(noisy, bool):
             self.show_noisy = noisy
@@ -434,19 +496,26 @@ class DiffusionCanvasWindow(QMainWindow):
         else:
             self.showing_quick_preview = False
 
-        if modified_bounds is None:
-            self.dirty_region_quick = full_bounds
-            self.dirty_region_full = full_bounds
-        else:
+        if region is not None:
+            if region == 'all':
+                region = full_bounds
+
+            if isinstance(region, str):
+                region = None
+
+            if not isinstance(region, Bounds2D):
+                region = None
+
+        if isinstance(region, Bounds2D):
             self.dirty_region_quick = (
-                modified_bounds
+                region
                 if self.dirty_region_quick is None
-                else self.dirty_region_quick.get_encapsulated(modified_bounds)
+                else self.dirty_region_quick.get_encapsulated(region)
             )
             self.dirty_region_full = (
-                modified_bounds
+                region
                 if self.dirty_region_full is None
-                else self.dirty_region_full.get_encapsulated(modified_bounds)
+                else self.dirty_region_full.get_encapsulated(region)
             )
 
         region_to_redraw = (
@@ -462,8 +531,8 @@ class DiffusionCanvasWindow(QMainWindow):
         region_to_redraw = region_to_redraw.get_clipped(full_bounds)
         region_to_redraw_with_padding = region_to_redraw_with_padding.get_clipped(full_bounds)
 
-        if region_to_redraw_with_padding == full_bounds or self.canvas_image_tensor is None:
-            self.canvas_image_tensor = self.api.latent_to_image_tiled(
+        if region_to_redraw_with_padding == full_bounds or self.gpu_canvas_image_tensor is None:
+            self.gpu_canvas_image_tensor = self.api.latent_to_image_tiled(
                 latent_to_show,
                 max_tile_size_latents=64,
                 overlap_size_latents=8,
@@ -504,7 +573,7 @@ class DiffusionCanvasWindow(QMainWindow):
             ]
 
             with Timer("Write to Image Tensor"):
-                self.canvas_image_tensor[
+                self.gpu_canvas_image_tensor[
                     :, :,
                     region_to_redraw.y_bounds[0] * latent_size_in_pixels:
                     region_to_redraw.y_bounds[1] * latent_size_in_pixels,
@@ -512,11 +581,14 @@ class DiffusionCanvasWindow(QMainWindow):
                     region_to_redraw.x_bounds[1] * latent_size_in_pixels
                 ] = decoded_trimmed
 
-        with Timer("Convert to QImage"):
-            q_image = conv.convert(self.canvas_image_tensor, QImage)
+        with Timer("Convert and Pass to CPU"):
+            cpu_image_tensor = self._get_cpu_image_tensor(self.gpu_canvas_image_tensor)
+
+        with Timer("Write to CPU buffer"):
+            self.cpu_canvas_image_tensor[:, :, :] = cpu_image_tensor
 
         with Timer("Update Canvas"):
-            self.canvas_view.update_image(q_image)
+            self.canvas_view.update_image(self.cpu_canvas_q_image)
 
         if full:
             self.dirty_region_full = None

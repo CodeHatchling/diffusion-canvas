@@ -108,6 +108,11 @@ class Bounds2D:
         )
 
     def __eq__(self, other):
+        if not hasattr(other, "x_bounds"):
+            return False
+        if not hasattr(other, "y_bounds"):
+            return False
+
         return self.x_bounds == other.x_bounds and self.y_bounds == other.y_bounds
 
     def _get_span(self):
