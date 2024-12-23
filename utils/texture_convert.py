@@ -362,6 +362,113 @@ def array_to_qimage(array: LabeledArray) -> 'QImage':
     return q_image
 
 
+def qimage_to_array(q_image: QImage) -> 'LabeledArray':
+
+    # Values are: (
+    #     shape description,
+    #     channel count,
+    #     remove last channel
+    #     data type,
+    #     type description
+    # )
+
+    width = q_image.width()
+    height = q_image.height()
+
+    table = {
+        QImage.Format.Format_RGB32: (
+            ("height", "width", "channels"),
+            4, True,
+            np.uint8,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_RGB888: (
+            ("height", "width", "channels"),
+            3, False,
+            np.uint8,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_RGBA8888: (
+            ("height", "width", "channels"),
+            4, False,
+            np.uint8,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_Grayscale8: (
+            ("height", "width", "channels"),
+            1, False,
+            np.uint8,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_Grayscale16: (
+            ("height", "width", "channels"),
+            1, False,
+            np.uint16,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_RGBX64: (
+            ("height", "width", "channels"),
+            4, True,
+            np.uint16,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_RGBX16FPx4: (
+            ("height", "width", "channels"),
+            4, True,
+            np.float16,
+            DTypeDesc.raw
+        ),
+        QImage.Format.Format_RGBX32FPx4: (
+            ("height", "width", "channels"),
+            4, True,
+            np.float32,
+            DTypeDesc.raw
+        ),
+        QImage.Format.Format_RGBA64: (
+            ("height", "width", "channels"),
+            4, False,
+            np.uint16,
+            DTypeDesc.normalized
+        ),
+        QImage.Format.Format_RGBA16FPx4: (
+            ("height", "width", "channels"),
+            4, False,
+            np.float16,
+            DTypeDesc.raw
+        ),
+        QImage.Format.Format_RGBA32FPx4: (
+            ("height", "width", "channels"),
+            4, False,
+            np.float32,
+            DTypeDesc.raw
+        ),
+    }
+
+    q_image_format = q_image.format()
+
+    if q_image_format in table:
+        shape_desc, channels, remove_alpha, dtype, dtype_desc = table[q_image_format]
+    else:
+        raise ValueError(f"Unsupported format: {q_image_format}")
+
+    # Access image bytes and convert to numpy array
+    data = q_image.bits().asarray(q_image.sizeInBytes())
+    data = np.frombuffer(data, dtype=dtype)
+    data = data.reshape((height, width, channels))
+
+    if remove_alpha:
+        # Throw away the last channel (dimension 2)
+        data = data[:, :, 0:3]
+
+    # Swap the red and blue channels.
+    # QImages seem to store their stuff in BGRA?
+    old_data = data.copy()
+    data[:, :, 0] = old_data[:, :, 2]
+    data[:, :, 2] = old_data[:, :, 0]
+
+    return LabeledArray(data, shape_desc, dtype_desc)
+
+
 def convert_to_labelled_array(source: LabeledArray | PIL.Image.Image | torch.Tensor | QImage | moderngl.Texture) \
         -> 'LabeledArray':
 
@@ -375,9 +482,8 @@ def convert_to_labelled_array(source: LabeledArray | PIL.Image.Image | torch.Ten
         source = sdimage_to_array(source)
     elif isinstance(source, moderngl.Texture):
         source = mgltex_to_array(source)
-    # TODO: Implement QImage to LabelledArray
-    # elif isinstance(source, QImage):
-    #     source = qimage_to_array(source)
+    elif isinstance(source, QImage):
+        source = qimage_to_array(source)
     else:
         raise ValueError(f"Unsupported source type: {type(source)}")
 

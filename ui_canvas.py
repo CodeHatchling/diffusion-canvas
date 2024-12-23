@@ -56,6 +56,17 @@ class Canvas(QScrollArea):
 
         self.canvas_widget.setSizePolicy(size_policy)
 
+    def get_q_image(self) -> QImage | None:
+        pixmap = self.label.pixmap()
+        if pixmap is None:
+            return None
+
+        q_image = pixmap.toImage()
+        if q_image.format() == QImage.Format.Format_Invalid:
+            return None
+
+        return q_image
+
     def coord_local_to_normalized(self, local_point: QPoint):
         pixmap: QPixmap = self.label.pixmap()
 

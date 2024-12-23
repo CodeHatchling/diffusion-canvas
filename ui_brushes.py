@@ -15,6 +15,19 @@ from layer import Layer
 from ui_utils import ExceptionCatcher
 from ui_widgets import Slider
 
+from common import *
+
+
+class BrushStrokeInfo:
+    modified_bounds: Bounds2D | None
+    show_noisy: bool
+
+    def __init__(self,
+                 modified_bounds: Bounds2D | None,
+                 show_noisy: bool):
+        self.modified_bounds = modified_bounds
+        self.show_noisy = show_noisy
+
 
 class BaseBrushTool:
     def __init__(self,
@@ -25,7 +38,6 @@ class BaseBrushTool:
 
         self._tool_settings_dock = tool_settings_dock
         self._extra_on_tool_button_click = on_tool_button_click
-        self.show_noisy = False
 
         button = QPushButton()
         button.setText(icon_emoji)
@@ -59,7 +71,7 @@ class BaseBrushTool:
                             params,
                             mouse_button: Qt.MouseButton,
                             event: QMouseEvent,
-                            normalized_mouse_coord: (float, float)):
+                            normalized_mouse_coord: (float, float)) -> BrushStrokeInfo:
         ...
 
 
@@ -189,35 +201,47 @@ class NoiseBrushTool(BaseBrushTool):
                             params,
                             mouse_button: Qt.MouseButton,
                             event: QMouseEvent,
-                            normalized_mouse_coord: (float, float)):
+                            normalized_mouse_coord: (float, float)) -> BrushStrokeInfo:
         ctrl_modifier = event.modifiers() & Qt.KeyboardModifier.ControlModifier  # Check if Ctrl is held
 
         if mouse_button == Qt.MouseButton.LeftButton:
             if ctrl_modifier:
-                self._api.draw_remove_noise_dab(layer=layer,
-                                                position_xy=normalized_mouse_coord,
-                                                pixel_radius=self.noise_brush_radius,
-                                                noise_intensity=self.noise_brush_intensity)
+                bounds = self._api.draw_remove_noise_dab(
+                    layer=layer,
+                    position_xy=normalized_mouse_coord,
+                    pixel_radius=self.noise_brush_radius,
+                    noise_intensity=self.noise_brush_intensity
+                )
             else:
-                self._api.draw_noise_dab(layer=layer,
-                                         position_xy=normalized_mouse_coord,
-                                         pixel_radius=self.noise_brush_radius,
-                                         noise_intensity=self.noise_brush_intensity)
-            self.show_noisy = True
+                bounds = self._api.draw_noise_dab(
+                    layer=layer,
+                    position_xy=normalized_mouse_coord,
+                    pixel_radius=self.noise_brush_radius,
+                    noise_intensity=self.noise_brush_intensity
+                )
+            return BrushStrokeInfo(
+                show_noisy=True,
+                modified_bounds=bounds
+            )
 
         elif mouse_button == Qt.MouseButton.RightButton:
-            self._api.draw_denoise_dab(layer=layer,
-                                       params=params,
-                                       position_xy=normalized_mouse_coord,
-                                       pixel_radius=self.denoise_brush_radius,
-                                       context_region_pixel_size_xy=(
-                                           self.denoise_context_size_x,
-                                           self.denoise_context_size_y
-                                       ),
-                                       attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
-                                       noise_bias=2 ** self.denoise_bias,
-                                       time_budget=0.1)
-            self.show_noisy = False
+            bounds = self._api.draw_denoise_dab(
+                layer=layer,
+                params=params,
+                position_xy=normalized_mouse_coord,
+                pixel_radius=self.denoise_brush_radius,
+                context_region_pixel_size_xy=(
+                   self.denoise_context_size_x,
+                   self.denoise_context_size_y
+                ),
+                attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
+                noise_bias=2 ** self.denoise_bias,
+                time_budget=0.1
+            )
+            return BrushStrokeInfo(
+                show_noisy=False,
+                modified_bounds=bounds
+            )
 
 
 class LatentBrushTool(BaseBrushTool):
@@ -298,19 +322,28 @@ class LatentBrushTool(BaseBrushTool):
                             params,
                             mouse_button: Qt.MouseButton,
                             event: QMouseEvent,
-                            normalized_mouse_coord: (float, float)):
+                            normalized_mouse_coord: (float, float)) -> BrushStrokeInfo:
         if mouse_button == Qt.MouseButton.LeftButton:
-            self._api.draw_latent_dab(layer=layer,
-                                      blend_mode=self.blend_mode,
-                                      value=self.brush_value,
-                                      position_xy=normalized_mouse_coord,
-                                      pixel_radius=self.brush_radius,
-                                      opacity=self.brush_opacity)
-
-            self.show_noisy = False
+            bounds = self._api.draw_latent_dab(
+                layer=layer,
+                blend_mode=self.blend_mode,
+                value=self.brush_value,
+                position_xy=normalized_mouse_coord,
+                pixel_radius=self.brush_radius,
+                opacity=self.brush_opacity
+            )
+            return BrushStrokeInfo(
+                show_noisy=False,
+                modified_bounds=bounds
+            )
 
         elif mouse_button == Qt.MouseButton.RightButton:
-            self.brush_value = self._api.get_average_latent(layer=layer,
-                                                            position_xy=normalized_mouse_coord,
-                                                            pixel_radius=self.brush_radius)
-            self.show_noisy = False
+            self.brush_value = self._api.get_average_latent(
+                layer=layer,
+                position_xy=normalized_mouse_coord,
+                pixel_radius=self.brush_radius
+            )
+            return BrushStrokeInfo(
+                show_noisy=False,
+                modified_bounds=None
+            )
