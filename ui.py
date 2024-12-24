@@ -45,7 +45,6 @@ from common import *
 
 
 class DiffusionCanvasWindow(QMainWindow):
-    gpu_canvas_image_tensor: torch.Tensor | None
     cpu_canvas_image_tensor: torch.Tensor
     cpu_canvas_q_image: QImage
     show_noisy: bool
@@ -174,7 +173,6 @@ class DiffusionCanvasWindow(QMainWindow):
         self.show_noisy = False
         self.dirty_region_full: Bounds2D | None = None
         self.dirty_region_quick: Bounds2D | None = None
-        self.gpu_canvas_image_tensor = None
 
         image_size = (
             layer.clean_latent.shape[2] * latent_size_in_pixels,
@@ -524,6 +522,10 @@ class DiffusionCanvasWindow(QMainWindow):
             else self.dirty_region_quick
         )
 
+        # No region to update.
+        if region_to_redraw is None:
+            return
+
         # Expand the region to account for VAE artifacts at edges
         region_to_redraw_with_padding = region_to_redraw.get_expanded(expand_amount_x=4, expand_amount_y=4)
 
@@ -531,29 +533,35 @@ class DiffusionCanvasWindow(QMainWindow):
         region_to_redraw = region_to_redraw.get_clipped(full_bounds)
         region_to_redraw_with_padding = region_to_redraw_with_padding.get_clipped(full_bounds)
 
-        if region_to_redraw_with_padding == full_bounds or self.gpu_canvas_image_tensor is None:
-            self.gpu_canvas_image_tensor = self.api.latent_to_image_tiled(
-                latent_to_show,
-                max_tile_size_latents=64,
-                overlap_size_latents=8,
-                margin_size_latents=4,
-                full_quality=full,
-                dest_type=None
-            )
+        if region_to_redraw_with_padding == full_bounds:
+            with Timer("Decode"):
+                decoded_tensor = self.api.latent_to_image_tiled(
+                    latent_to_show,
+                    max_tile_size_latents=64,
+                    overlap_size_latents=8,
+                    margin_size_latents=4,
+                    full_quality=full,
+                    dest_type=None
+                )
+
+            with Timer("Convert and Pass to CPU"):
+                cpu_image_tensor = self._get_cpu_image_tensor(decoded_tensor)
+
+            with Timer("Write to CPU buffer"):
+                self.cpu_canvas_image_tensor[:, :, :] = cpu_image_tensor
         else:
             from diffusion_canvas_api import latent_size_in_pixels
 
-            with Timer("Create Latent View"):
-                latent_view = latent_to_show[
-                    :, :,
-                    region_to_redraw_with_padding.y_bounds[0]:
-                    region_to_redraw_with_padding.y_bounds[1],
-                    region_to_redraw_with_padding.x_bounds[0]:
-                    region_to_redraw_with_padding.x_bounds[1],
-                ]
+            latent_view = latent_to_show[
+                :, :,
+                region_to_redraw_with_padding.y_bounds[0]:
+                region_to_redraw_with_padding.y_bounds[1],
+                region_to_redraw_with_padding.x_bounds[0]:
+                region_to_redraw_with_padding.x_bounds[1],
+            ]
 
             with Timer("Decode"):
-                decoded = self.api.latent_to_image_tiled(
+                decoded_tensor = self.api.latent_to_image_tiled(
                     latent_view,
                     max_tile_size_latents=64,
                     overlap_size_latents=8,
@@ -564,7 +572,7 @@ class DiffusionCanvasWindow(QMainWindow):
 
             # Trim the margins from the decoded view as they usually contain artifacts.
             relative_bounds = region_to_redraw_with_padding.transform_bounds(region_to_redraw)
-            decoded_trimmed = decoded[
+            decoded_tensor = decoded_tensor[
                 :, :,
                 relative_bounds.y_bounds[0] * latent_size_in_pixels:
                 relative_bounds.y_bounds[1] * latent_size_in_pixels,
@@ -572,23 +580,19 @@ class DiffusionCanvasWindow(QMainWindow):
                 relative_bounds.x_bounds[1] * latent_size_in_pixels,
             ]
 
-            with Timer("Write to Image Tensor"):
-                self.gpu_canvas_image_tensor[
-                    :, :,
+            with Timer("Convert and Pass to CPU"):
+                cpu_image_tensor = self._get_cpu_image_tensor(decoded_tensor)
+
+            with Timer("Write to CPU buffer"):
+                self.cpu_canvas_image_tensor[
                     region_to_redraw.y_bounds[0] * latent_size_in_pixels:
                     region_to_redraw.y_bounds[1] * latent_size_in_pixels,
                     region_to_redraw.x_bounds[0] * latent_size_in_pixels:
-                    region_to_redraw.x_bounds[1] * latent_size_in_pixels
-                ] = decoded_trimmed
+                    region_to_redraw.x_bounds[1] * latent_size_in_pixels,
+                    :
+                ] = cpu_image_tensor
 
-        with Timer("Convert and Pass to CPU"):
-            cpu_image_tensor = self._get_cpu_image_tensor(self.gpu_canvas_image_tensor)
-
-        with Timer("Write to CPU buffer"):
-            self.cpu_canvas_image_tensor[:, :, :] = cpu_image_tensor
-
-        with Timer("Update Canvas"):
-            self.canvas_view.update_image(self.cpu_canvas_q_image)
+        self.canvas_view.update_image(self.cpu_canvas_q_image)
 
         if full:
             self.dirty_region_full = None
