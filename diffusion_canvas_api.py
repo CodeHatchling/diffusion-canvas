@@ -104,6 +104,38 @@ def _get_brush_bounds(latent_xy: tuple[float, float],
     )
 
 
+def cubic_interpolation(
+        t: float,
+        start_value: float,
+        end_value: float,
+        start_steepness: float,
+        end_steepness: float
+) -> float:
+    """
+    Computes f(t) for a cubic polynomial f that satisfies:
+      f(0)   = start_value
+      f(1)   = end_value
+      f'(0)  = start_steepness
+      f'(1)  = end_steepness
+
+    The function is sampled at t in the range [0, 1].
+    """
+    # Boundary conditions
+    d = start_value
+    c = start_steepness
+
+    # Temporary helpers
+    A = (end_value - start_value) - c
+    B = end_steepness - c
+
+    # Solve for a and b
+    a = B - 2 * A
+    b = 3 * A - B
+
+    # Evaluate the cubic polynomial at t
+    return a * t ** 3 + b * t ** 2 + c * t + d
+
+
 class DiffusionCanvasAPI:
     class BlendMode(Enum):
         Blend = 0
@@ -267,6 +299,37 @@ class DiffusionCanvasAPI:
 
         return decode_image(latent, full_quality=True)
 
+    @staticmethod
+    @torch.no_grad()
+    def _get_blended(layer: Layer,
+                     value: tuple[float, float, float, float],
+                     alpha: torch.Tensor,
+                     blend_mode: 'DiffusionCanvasAPI.BlendMode'):
+        """
+        Args:
+            layer: Layer to which the blending procedure is applied.
+            value: The current latent color to blend.
+            alpha: Opacity mask.
+            blend_mode: The current blend mode.
+
+        Returns:
+            A modified copy of the latent with the current blending operation applied.
+        """
+
+        if blend_mode == DiffusionCanvasAPI.BlendMode.Add:
+            solid = layer.create_solid_latent(value)
+            return solid * alpha + layer.clean_latent
+
+        elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
+            average = layer.get_average_latent(alpha)
+            difference = tuple(v - a for v, a in zip(value, average))
+            solid = layer.create_solid_latent(difference)
+            return solid * alpha + layer.clean_latent
+
+        else:
+            solid = layer.create_solid_latent(value)
+            return solid * alpha + layer.clean_latent * (1-alpha)
+
     @torch.no_grad()
     def draw_latent_dab(self,
                         layer: Layer,
@@ -294,23 +357,7 @@ class DiffusionCanvasAPI:
             mode="blend"
         ).to(layer.clean_latent.device)
 
-        if blend_mode == DiffusionCanvasAPI.BlendMode.Add:
-            solid = layer.create_solid_latent(value)
-            new_clean_latent = solid * alpha + layer.clean_latent
-            layer.replace_clean_latent(new_clean_latent)
-
-        elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
-            average = layer.get_average_latent(alpha)
-            difference = tuple(v - a for v, a in zip(value, average))
-            solid = layer.create_solid_latent(difference)
-            new_clean_latent = solid * alpha + layer.clean_latent
-            layer.replace_clean_latent(new_clean_latent)
-            pass
-
-        else:
-            solid = layer.create_solid_latent(value)
-            new_clean_latent = solid * alpha + layer.clean_latent * (1-alpha)
-            layer.replace_clean_latent(new_clean_latent)
+        layer.replace_clean_latent(self._get_blended(layer, value, alpha, blend_mode))
 
         return _get_brush_bounds(
             (latent_x, latent_y),
@@ -452,8 +499,219 @@ class DiffusionCanvasAPI:
                        y_bounds=y_bounds,
                        x_bounds=x_bounds)
 
-        return _get_brush_bounds(
+        brush_bounds = _get_brush_bounds(
             (latent_x, latent_y),
             latent_radius,
             (layer.clean_latent.shape[3], layer.clean_latent.shape[2])
         )
+
+        context_bounds = Bounds2D(x_bounds=x_bounds, y_bounds=y_bounds)
+
+        return brush_bounds.get_clipped(context_bounds)
+
+    @torch.no_grad()
+    def draw_shift_dab(self,
+                       params,
+                       layer: Layer,
+                       position_xy: tuple[float, float],
+                       pixel_radius: float,
+                       noise_intensity: float,
+                       noise_bias: float,
+                       context_region_pixel_size_xy: tuple[int, int],
+                       denoise_steps: int) -> Bounds2D | None:
+
+        if self._denoiser is None:
+            print("No denoiser! Press [Generate] to send the denoiser to Diffusion Canvas.")
+            return None
+
+        if params is None:
+            print("No params! Press [Generate] to send denoising parameters to Diffusion Canvas.")
+            return None
+
+        latent_size_xy = (
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[0] / latent_size_in_pixels)), latent_size_in_pixels),
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[1] / latent_size_in_pixels)), latent_size_in_pixels)
+        )
+
+        latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
+            position_xy,
+            layer.noise_amplitude
+        )
+        noise_latent_radius = pixel_radius / latent_size_in_pixels
+
+        # Define the bounds.
+        y_bounds = _get_cropped_1d(int(latent_y), latent_size_xy[1], layer.clean_latent.shape[2])
+        x_bounds = _get_cropped_1d(int(latent_x), latent_size_xy[0], layer.clean_latent.shape[3])
+        noise_bounds = _get_brush_bounds(
+            (latent_x, latent_y),
+            noise_latent_radius,
+            (layer.clean_latent.shape[3], layer.clean_latent.shape[2])
+        )
+        context_bounds = Bounds2D(x_bounds=x_bounds, y_bounds=y_bounds)
+        noise_bounds = noise_bounds.get_clipped(context_bounds)
+
+        noise_mask = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            noise_latent_radius,
+            (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
+            opacity=1,
+            mode="blend"
+        ).to(shared.device)
+
+        #    2.a. Return early if the total noise is zero.
+        if noise_intensity <= 0:
+            return None
+
+        layer.add_noise(noise_mask * noise_intensity)
+
+        # 3. Denoise the region.
+        noise_start = 1
+        for i in range(denoise_steps):
+            t_end = (i+1) / denoise_steps
+            noise_end = cubic_interpolation(t_end,
+                                            start_value=1,
+                                            end_value=0,
+                                            start_steepness=-1,
+                                            end_steepness=0)
+
+            attenuation = noise_end / noise_start if noise_start != 0 else 0
+            if math.isnan(attenuation) or math.isinf(attenuation):
+                attenuation = 0
+
+            layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
+                       lambda x: x * attenuation,
+                       brush_mask=None,
+                       noise_bias=noise_bias,
+                       y_bounds=y_bounds,
+                       x_bounds=x_bounds)
+
+            noise_start = noise_end
+
+        return noise_bounds
+
+    @torch.no_grad()
+    def draw_color_shift_dab(self,
+                             params,
+                             layer: Layer,
+                             blend_mode: 'DiffusionCanvasAPI.BlendMode',
+                             value: tuple[float, float, float, float],
+                             position_xy: tuple[float, float],
+                             pixel_radius: float,
+                             opacity: float,
+                             noise_pixel_radius: float,
+                             noise_scale: float,
+                             noise_bias: float,
+                             context_region_pixel_size_xy: tuple[int, int],
+                             denoise_steps: int) -> Bounds2D | None:
+
+        if self._denoiser is None:
+            print("No denoiser! Press [Generate] to send the denoiser to Diffusion Canvas.")
+            return None
+
+        if params is None:
+            print("No params! Press [Generate] to send denoising parameters to Diffusion Canvas.")
+            return None
+
+        latent_size_xy = (
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[0] / latent_size_in_pixels)), latent_size_in_pixels),
+            np.maximum(int(math.ceil(context_region_pixel_size_xy[1] / latent_size_in_pixels)), latent_size_in_pixels)
+        )
+
+        latent_x, latent_y, latent_y_flipped = _position_to_latent_coords(
+            position_xy,
+            layer.noise_amplitude
+        )
+        draw_latent_radius = pixel_radius / latent_size_in_pixels
+        noise_latent_radius = noise_pixel_radius / latent_size_in_pixels
+
+        # Define the bounds.
+        y_bounds = _get_cropped_1d(int(latent_y), latent_size_xy[1], layer.clean_latent.shape[2])
+        x_bounds = _get_cropped_1d(int(latent_x), latent_size_xy[0], layer.clean_latent.shape[3])
+        draw_bounds = _get_brush_bounds(
+            (latent_x, latent_y),
+            draw_latent_radius,
+            (layer.clean_latent.shape[3], layer.clean_latent.shape[2])
+        )
+        noise_bounds = _get_brush_bounds(
+            (latent_x, latent_y),
+            noise_latent_radius,
+            (layer.clean_latent.shape[3], layer.clean_latent.shape[2])
+        )
+        context_bounds = Bounds2D(x_bounds=x_bounds, y_bounds=y_bounds)
+        noise_bounds = noise_bounds.get_clipped(context_bounds)
+        total_bounds = draw_bounds.get_encapsulated(noise_bounds)
+
+        paint_mask = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            draw_latent_radius,
+            (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
+            opacity=1,
+            mode="blend"
+        ).to(shared.device)
+
+        noise_mask = self._brushes.draw_dab(
+            torch.zeros_like(layer.noise_amplitude),
+            (latent_x, latent_y_flipped),
+            noise_latent_radius,
+            (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
+            opacity=1,
+            mode="blend"
+        ).to(shared.device)
+
+        # 1. Apply the blend procedure to the affected area,
+        #    and get the amplitude of difference introduced by the change.
+        blended = self._get_blended(layer, value, paint_mask * opacity, blend_mode)
+
+        #    1.a. Calculate the amplitude of the change from the old to the new.
+        difference = layer.clean_latent - blended  # Shape: (1, 4, 64, 64)
+
+        #    1.b. Compute the average norm of each latent
+        difference = torch.norm(
+            input=difference,
+            p=2,
+            dim=1)
+        difference = difference.mean().squeeze().item()
+
+        #    1.c. Scale the difference by the mask.
+        average_mask_value = paint_mask.mean().squeeze().item()
+        if average_mask_value > 0:
+            difference /= average_mask_value
+
+        #    1.d. Replace the latent with the blended.
+        layer.replace_clean_latent(blended)
+
+        # 2. Add noise overtop of the latent proportional to the difference introduced.
+        noise_amplitude = difference * noise_scale
+
+        #    2.a. Return early if the total noise is zero.
+        if noise_amplitude <= 0:
+            return draw_bounds
+
+        layer.add_noise(noise_mask * noise_amplitude)
+
+        # 3. Denoise the region.
+        noise_start = 1
+        for i in range(denoise_steps):
+            t_end = (i+1) / denoise_steps
+            noise_end = cubic_interpolation(t_end,
+                                            start_value=1,
+                                            end_value=0,
+                                            start_steepness=-1,
+                                            end_steepness=0)
+
+            attenuation = noise_end / noise_start if noise_start != 0 else 0
+            if math.isnan(attenuation) or math.isinf(attenuation):
+                attenuation = 0
+
+            layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
+                       lambda x: x * attenuation,
+                       brush_mask=None,
+                       noise_bias=noise_bias,
+                       y_bounds=y_bounds,
+                       x_bounds=x_bounds)
+
+            noise_start = noise_end
+
+        return total_bounds

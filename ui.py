@@ -38,7 +38,7 @@ from layer import History, Layer
 from ui_utils import ExceptionCatcher
 from ui_params import ParamsWidget
 from ui_dialogs import NewCanvasDialog
-from ui_brushes import BaseBrushTool, NoiseBrushTool, LatentBrushTool
+from ui_brushes import BaseBrushTool, NoiseBrushTool, LatentBrushTool, ShiftBrushTool
 from ui_canvas import Canvas
 
 from common import *
@@ -150,6 +150,13 @@ class DiffusionCanvasWindow(QMainWindow):
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
             on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool)
+        )
+
+        self.shift_brush_tool = ShiftBrushTool(
+            api=self.api,
+            tool_dock_layout=tool_layout,
+            tool_settings_dock=tool_settings_dock,
+            on_tool_button_click=lambda: set_current_tool(self.shift_brush_tool)
         )
 
         # Setup update timer
