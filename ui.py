@@ -17,14 +17,13 @@ from PyQt6.QtWidgets import (
     QWidget,
     QDockWidget,
     QPushButton,
-    QScrollArea,
     QHBoxLayout,
     QDialog,
     QFileDialog,
     QMessageBox
 )
 
-from PyQt6.QtGui import QImage, QMouseEvent, QKeyEvent
+from PyQt6.QtGui import QImage, QMouseEvent, QKeyEvent, QPixmap
 from PyQt6.QtCore import Qt, QTimer
 
 import PIL.Image
@@ -129,12 +128,20 @@ class DiffusionCanvasWindow(QMainWindow):
         tool_layout = QHBoxLayout(tool_widget)
         tool_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         tool_dock.setWidget(tool_widget)
-        # Set the title bar to be vertical to save space.
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, tool_dock)
+
         # Dock widget for latent picker
+        def get_latent_preview(latent_value: tuple[float, float, float, float]) -> QPixmap:
+            image: QImage = self.api.generate_solid_latent(
+                latent_value=latent_value,
+                size_latents=(8, 8),
+                dest_type=QImage
+            )
+            return QPixmap.fromImage(image)
+
         latent_picker_dock = QDockWidget("Latent Picker", self)
         latent_picker_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        latent_picker_widget = LatentPicker()
+        latent_picker_widget = LatentPicker(get_latent_preview)
         latent_picker_dock.setWidget(latent_picker_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, latent_picker_dock)
 
@@ -160,7 +167,7 @@ class DiffusionCanvasWindow(QMainWindow):
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
             on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool),
-            get_latent_value=lambda: latent_picker_widget.color_picker.get_current_latent_value(update_swatches=True),
+            get_latent_value=lambda: latent_picker_widget.color_picker.use_current_latent_value(),
             set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 
@@ -169,7 +176,7 @@ class DiffusionCanvasWindow(QMainWindow):
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
             on_tool_button_click=lambda: set_current_tool(self.shift_brush_tool),
-            get_latent_value=lambda: latent_picker_widget.color_picker.get_current_latent_value(update_swatches=True),
+            get_latent_value=lambda: latent_picker_widget.color_picker.use_current_latent_value(),
             set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 

@@ -717,3 +717,16 @@ class DiffusionCanvasAPI:
             noise_start = noise_end
 
         return total_bounds
+
+    def generate_solid_latent(self,
+                              latent_value: tuple[float, float, float, float],
+                              size_latents: tuple[int, int],
+                              dest_type):
+        # Create a tensor with the same shape as clean_latent, where each channel is set to value[channel]
+        value_tensor = torch.tensor(
+            latent_value,
+            dtype=torch.float32,
+            device=shared.device
+        ).view(1, -1, 1, 1).expand((1, -1, size_latents[1], size_latents[0]))
+
+        return self.latent_to_image(value_tensor, full_quality=True, dest_type=dest_type)

@@ -6,6 +6,14 @@ import numpy as np
 from ui_utils import ExceptionCatcher
 
 
+def _call_handlers(handlers: list[callable]):
+    for handler in handlers:
+        try:
+            handler()
+        except Exception as e:
+            print(e)
+
+
 class Slider(QWidget):
     def __init__(self,
                  label: str,
@@ -14,6 +22,8 @@ class Slider(QWidget):
                  step_size: int | float = 1,
                  parent: QWidget | None = None,):
         super().__init__(parent)
+
+        self.on_ui_value_changed: list[callable] = []
 
         if not (min_max[1] > min_max[0]):
             raise ValueError(
@@ -110,6 +120,7 @@ class Slider(QWidget):
                     self._value_display.setText(f"{self._value}")
                 else:
                     self._value_display.setText(f"{self._value:.2f}")
+                _call_handlers(self.on_ui_value_changed)
             finally:
                 self.recursion_check = False
 
@@ -122,6 +133,7 @@ class Slider(QWidget):
             try:
                 self._value = int(self._value_display.text()) if self._is_int else float(self._value_display.text())
                 self._slider.setValue(self._value_to_step(self._value))
+                _call_handlers(self.on_ui_value_changed)
             except ValueError:
                 return
             finally:
@@ -141,7 +153,6 @@ class Slider(QWidget):
                     self._value_display.setText(f"{self._value}")
                 else:
                     self._value_display.setText(f"{self._value:.2f}")
-
             except ValueError:
                 return
             finally:
