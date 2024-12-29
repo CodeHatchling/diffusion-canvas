@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout, QScrollArea
 
-from PyQt6.QtCore import Qt, QObject, QEvent
+from PyQt6.QtCore import Qt, QObject, QEvent, QSize
 import math
 import numpy as np
 from ui_utils import ExceptionCatcher
@@ -157,17 +157,22 @@ class VerticalScrollArea(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-    def eventFilter(self, q_object: QObject | None, q_event: QEvent) -> bool:
+        self.horizontalScrollBar().rangeChanged.connect(self._reset_min_width)
+
+    def _reset_min_width(self):
+        self.setMinimumWidth(self.minimumSizeHint().width())
+
+    def minimumSizeHint(self) -> QSize:
+        our_min_size = super().minimumSizeHint()
 
         our_widget = self.widget()
-        is_our_widget = our_widget is not None and q_object is our_widget
-        is_resize_event = q_event.type() == QEvent.Type.Resize
+        if our_widget is None:
+            return our_min_size
 
-        if is_our_widget and is_resize_event:
-            vanilla_min_width = super().minimumSizeHint().width()
-            proposed_min_width = our_widget.minimumSizeHint().width() + self.frameWidth() * 2
-            new_min_width = proposed_min_width if proposed_min_width > vanilla_min_width else proposed_min_width
-            self.setMinimumWidth(new_min_width)
+        total_frame_width = self.frameWidth()
+        widget_width = our_widget.minimumSizeHint().width()
+        total_width = total_frame_width + widget_width
+        if our_min_size.width() < total_width:
+            our_min_size.setWidth(total_width)
 
-        return super().eventFilter(q_object, q_event)
-
+        return our_min_size
