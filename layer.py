@@ -242,7 +242,7 @@ class Layer:
 
             # How much should we blend the noisy and denoised latent together, given the previous
             # and attenuated noise levels?
-            renoise_fraction: float = attenuated_max_amplitude / max_amplitude
+            renoise_fraction: float = attenuated_max_amplitude / max_amplitude if max_amplitude > 0 else 0
             if math.isnan(renoise_fraction) or math.isinf(renoise_fraction):
                 renoise_fraction = 0
 
