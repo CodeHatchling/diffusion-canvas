@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout, QScrollArea
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, QEvent
 import math
 import numpy as np
 from ui_utils import ExceptionCatcher
@@ -70,17 +70,24 @@ class Slider(QWidget):
         # Finally, update the other widgets to match the slider.
         self._on_slider_changed()
 
-    def _get_value(self):
+    def __set_value(self, value):
+        self._value = value
+
+        if self._is_int:
+            self._value = int(self._value)
+
+    def __get_value(self):
         if self._is_int:
             self._value = int(self._value)
 
         return self._value
 
-    def _set_value(self, value):
-        self._value = value
+    def _get_value(self):
+        return self.__get_value()
 
-        if self._is_int:
-            self._value = int(self._value)
+    def _set_value(self, value):
+        self.__set_value(value)
+        self._on_value_changed()
 
     value = property(fget=_get_value, fset=_set_value)
 
@@ -99,7 +106,7 @@ class Slider(QWidget):
             try:
                 self._value = self._step_to_value(self._slider.value())
                 if self._is_int:
-                    self.value = int(self._value)
+                    self.__set_value(int(self._value))
                     self._value_display.setText(f"{self._value}")
                 else:
                     self._value_display.setText(f"{self._value:.2f}")
@@ -119,3 +126,48 @@ class Slider(QWidget):
                 return
             finally:
                 self.recursion_check = False
+
+    def _on_value_changed(self):
+        with ExceptionCatcher(None, "Failed to handle text change"):
+            if self.recursion_check:
+                return
+
+            self.recursion_check = True
+            try:
+                self._slider.setValue(self._value_to_step(self._value))
+
+                if self._is_int:
+                    self.__set_value(int(self._value))
+                    self._value_display.setText(f"{self._value}")
+                else:
+                    self._value_display.setText(f"{self._value:.2f}")
+
+            except ValueError:
+                return
+            finally:
+                self.recursion_check = False
+
+
+class VerticalScrollArea(QScrollArea):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+    def eventFilter(self, q_object: QObject | None, q_event: QEvent) -> bool:
+
+        our_widget = self.widget()
+        is_our_widget = our_widget is not None and q_object is our_widget
+        is_resize_event = q_event.type() == QEvent.Type.Resize
+
+        if is_our_widget and is_resize_event:
+            vanilla_min_width = super().minimumSizeHint().width()
+            proposed_min_width = our_widget.minimumSizeHint().width() + self.frameWidth() * 2
+            new_min_width = proposed_min_width if proposed_min_width > vanilla_min_width else proposed_min_width
+            self.setMinimumWidth(new_min_width)
+
+        return super().eventFilter(q_object, q_event)
+

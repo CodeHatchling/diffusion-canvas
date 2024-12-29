@@ -35,11 +35,13 @@ from sdwebui_interface import pop_intercepted, unfreeze_sd_webui
 from diffusion_canvas_api import DiffusionCanvasAPI, latent_size_in_pixels
 from layer import History, Layer
 
+from ui_widgets import VerticalScrollArea
 from ui_utils import ExceptionCatcher
 from ui_params import ParamsWidget
 from ui_dialogs import NewCanvasDialog
 from ui_brushes import BaseBrushTool, NoiseBrushTool, LatentBrushTool, ShiftBrushTool
 from ui_canvas import Canvas
+from ui_latent_picker import LatentPicker
 
 from common import *
 
@@ -107,9 +109,10 @@ class DiffusionCanvasWindow(QMainWindow):
         # Create a scrollable widget for params buttons
         self.params_widget = QWidget()
         self.params_layout = QVBoxLayout(self.params_widget)
+        self.params_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.params_widget.setLayout(self.params_layout)
 
-        self.params_scroll_area = QScrollArea()
+        self.params_scroll_area = VerticalScrollArea()
         self.params_scroll_area.setWidget(self.params_widget)
         self.params_scroll_area.setWidgetResizable(True)
 
@@ -121,12 +124,19 @@ class DiffusionCanvasWindow(QMainWindow):
 
         # Dock widget for tool buttons
         tool_dock = QDockWidget("Tools", self)
-        tool_dock.setAllowedAreas(Qt.DockWidgetArea.TopDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
+        tool_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         tool_widget = QWidget()
         tool_layout = QHBoxLayout(tool_widget)
         tool_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         tool_dock.setWidget(tool_widget)
-        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, tool_dock)
+        # Set the title bar to be vertical to save space.
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, tool_dock)
+        # Dock widget for latent picker
+        latent_picker_dock = QDockWidget("Latent Picker", self)
+        latent_picker_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        latent_picker_widget = LatentPicker()
+        latent_picker_dock.setWidget(latent_picker_widget)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, latent_picker_dock)
 
         # Dock widget for tool settings
         tool_settings_dock = QDockWidget("Tool Settings", self)
@@ -149,14 +159,18 @@ class DiffusionCanvasWindow(QMainWindow):
             api=self.api,
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
-            on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool)
+            on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool),
+            get_latent_value=lambda: latent_picker_widget.color_picker.get_current_latent_value(update_swatches=True),
+            set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 
         self.shift_brush_tool = ShiftBrushTool(
             api=self.api,
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
-            on_tool_button_click=lambda: set_current_tool(self.shift_brush_tool)
+            on_tool_button_click=lambda: set_current_tool(self.shift_brush_tool),
+            get_latent_value=lambda: latent_picker_widget.color_picker.get_current_latent_value(update_swatches=True),
+            set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 
         # Setup update timer

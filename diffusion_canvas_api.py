@@ -25,6 +25,8 @@ from common import *
 
 
 latent_size_in_pixels: int = 8
+latent_channel_count: int = 4
+color_channel_count: int = 3
 
 
 def _center_crop_for_sd(image: PIL.Image.Image, rounding: int):
@@ -188,8 +190,8 @@ class DiffusionCanvasAPI:
 
     @torch.no_grad()
     def create_empty_layer(self, latent_width: int, latent_height: int):
-        clean = torch.zeros(size=(1, 4, latent_height, latent_width), dtype=torch.float32, device=shared.device)
-        noisy = torch.zeros(size=(1, 4, latent_height, latent_width), dtype=torch.float32, device=shared.device)
+        clean = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width), dtype=torch.float32, device=shared.device)
+        noisy = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width), dtype=torch.float32, device=shared.device)
         amp = torch.zeros(size=(1, 1, latent_height, latent_width), dtype=torch.float32, device=shared.device)
         return Layer(
             clean,
@@ -221,7 +223,7 @@ class DiffusionCanvasAPI:
             device=image_tensor.device
         )
 
-        latent_tensor_shape = (1, 4, latent_height, latent_width)
+        latent_tensor_shape = (1, latent_channel_count, latent_height, latent_width)
         latent_tensor = torch.zeros(size=latent_tensor_shape, dtype=image_tensor.dtype, device=image_tensor.device)
 
         for tile_index in tiles.enumerate_tiles():
@@ -261,7 +263,7 @@ class DiffusionCanvasAPI:
             device=latent.device
         )
 
-        image_tensor_shape = (1, 3, latent.shape[2]*latent_size_in_pixels, latent.shape[3]*latent_size_in_pixels)
+        image_tensor_shape = (1, color_channel_count, latent.shape[2]*latent_size_in_pixels, latent.shape[3]*latent_size_in_pixels)
         image_tensor = torch.zeros(size=image_tensor_shape, dtype=latent.dtype, device=latent.device)
 
         for tile_index in tiles.enumerate_tiles():
@@ -284,7 +286,7 @@ class DiffusionCanvasAPI:
         height = int(np.maximum(1, np.ceil(height / latent_size_in_pixels)))
 
         sigma = 20
-        latent = torch.randn(size=(1, 4, height, width), dtype=torch.float32, device=shared.device) * sigma
+        latent = torch.randn(size=(1, latent_channel_count, height, width), dtype=torch.float32, device=shared.device) * sigma
 
         for i in range(steps):
             sigma_to_remove = (i+1) / steps
@@ -665,7 +667,7 @@ class DiffusionCanvasAPI:
         blended = self._get_blended(layer, value, paint_mask * opacity, blend_mode)
 
         #    1.a. Calculate the amplitude of the change from the old to the new.
-        difference = layer.clean_latent - blended  # Shape: (1, 4, 64, 64)
+        difference = layer.clean_latent - blended
 
         #    1.b. Compute the average norm of each latent
         difference = torch.norm(

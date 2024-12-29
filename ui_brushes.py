@@ -1,3 +1,5 @@
+from typing import Callable
+
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
     QLabel,
@@ -252,18 +254,18 @@ class NoiseBrushTool(BaseBrushTool):
 
 
 class LatentBrushTool(BaseBrushTool):
-
-    brush_value: tuple[float, float, float, float]
-
     def __init__(self,
                  api,
                  tool_dock_layout: QLayout,
                  tool_settings_dock: QDockWidget,
-                 on_tool_button_click: callable):
+                 on_tool_button_click: callable,
+                 get_latent_value: Callable[[], tuple[float, float, float, float]],
+                 set_latent_value: Callable[[tuple[float, float, float, float]], None]):
 
         super().__init__("🖌️️", tool_dock_layout, tool_settings_dock, on_tool_button_click)
         self._api = api
-        self.brush_value = (0.0, 0.0, 0.0, 0.0)
+        self._get_latent_value = get_latent_value
+        self._set_latent_value = set_latent_value
 
     def _create_tool_settings_dock_widget(self) -> QWidget:
         sliders_widget = QWidget()
@@ -334,7 +336,7 @@ class LatentBrushTool(BaseBrushTool):
             bounds = self._api.draw_latent_dab(
                 layer=layer,
                 blend_mode=self.blend_mode,
-                value=self.brush_value,
+                value=self._get_latent_value(),
                 position_xy=normalized_mouse_coord,
                 pixel_radius=self.brush_radius,
                 opacity=self.brush_opacity
@@ -345,11 +347,11 @@ class LatentBrushTool(BaseBrushTool):
             )
 
         elif mouse_button == Qt.MouseButton.RightButton:
-            self.brush_value = self._api.get_average_latent(
+            self._set_latent_value(self._api.get_average_latent(
                 layer=layer,
                 position_xy=normalized_mouse_coord,
                 pixel_radius=self.brush_radius
-            )
+            ))
             return BrushStrokeInfo(
                 show_noisy=False,
                 modified_bounds=None
@@ -357,7 +359,6 @@ class LatentBrushTool(BaseBrushTool):
 
 
 class ShiftBrushTool(BaseBrushTool):
-    brush_value: tuple[float, float, float, float]
     _color_mode: bool
     _color_shift_mode_widgets: list[tuple[str, QWidget]]
     _shift_mode_widgets: list[tuple[str, QWidget]]
@@ -366,12 +367,16 @@ class ShiftBrushTool(BaseBrushTool):
                  api,
                  tool_dock_layout: QLayout,
                  tool_settings_dock: QDockWidget,
-                 on_tool_button_click: callable):
+                 on_tool_button_click: callable,
+                 get_latent_value: Callable[[], tuple[float, float, float, float]],
+                 set_latent_value: Callable[[tuple[float, float, float, float]], None]):
 
         super().__init__("✨️️", tool_dock_layout, tool_settings_dock, on_tool_button_click)
         self._api = api
-        self.brush_value = (0.0, 0.0, 0.0, 0.0)
         self._color_mode = True
+
+        self._get_latent_value = get_latent_value
+        self._set_latent_value = set_latent_value
 
     @staticmethod
     def _add_widget(
@@ -585,7 +590,7 @@ class ShiftBrushTool(BaseBrushTool):
                     params=params,
                     layer=layer,
                     blend_mode=self.blend_mode,
-                    value=self.brush_value,
+                    value=self._get_latent_value(),
                     position_xy=normalized_mouse_coord,
                     pixel_radius=self.brush_radius,
                     opacity=self.brush_opacity,
@@ -604,11 +609,11 @@ class ShiftBrushTool(BaseBrushTool):
                 )
 
             elif mouse_button == Qt.MouseButton.RightButton:
-                self.brush_value = self._api.get_average_latent(
+                self._set_latent_value(self._api.get_average_latent(
                     layer=layer,
                     position_xy=normalized_mouse_coord,
                     pixel_radius=self.brush_radius
-                )
+                ))
                 return BrushStrokeInfo(
                     show_noisy=False,
                     modified_bounds=None
