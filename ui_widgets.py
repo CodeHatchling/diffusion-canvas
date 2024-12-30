@@ -1,4 +1,5 @@
-from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout, QScrollArea
+from PyQt6.QtGui import QPaintEvent, QPainter
+from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout, QScrollArea, QFrame, QLabel, QFormLayout, QLayout
 
 from PyQt6.QtCore import Qt, QObject, QEvent, QSize
 import math
@@ -22,6 +23,8 @@ class Slider(QWidget):
                  step_size: int | float = 1,
                  parent: QWidget | None = None,):
         super().__init__(parent)
+
+        self.setContentsMargins(0, 0, 0, 0)
 
         self.on_ui_value_changed: list[callable] = []
 
@@ -57,7 +60,7 @@ class Slider(QWidget):
         self._slider.setMaximum(self._steps)
         self._slider.setValue(self._value_to_step(self._value))
 
-        tick_steps = int(np.round((10 ** np.round(math.log10(self._span) - 1) / self._span) * self._steps))
+        tick_steps = int(np.round((10 ** np.ceil(math.log10(self._span) - 1) / self._span) * self._steps))
         self._slider.setSingleStep(tick_steps)
         self._slider.setTickPosition(QSlider.TickPosition.TicksBelow)
 
@@ -73,6 +76,7 @@ class Slider(QWidget):
         layout = QHBoxLayout()
         layout.addWidget(self._slider)
         layout.addWidget(self._value_display)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         # Add the layout to self.
         self.setLayout(layout)
@@ -187,3 +191,44 @@ class VerticalScrollArea(QScrollArea):
             our_min_size.setWidth(total_width)
 
         return our_min_size
+
+
+class HelpBox(QFrame):
+
+    def __init__(self, contents: list[any], parent=None):
+        super().__init__(parent)
+        self.setFrameStyle(QFrame.Shape.StyledPanel)
+        self.setLineWidth(3)
+        self.setContentsMargins(0, 0, 0, 0)
+        layout = QFormLayout(parent)
+        self.setLayout(layout)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        def item_is_tuple(item: any, element_types: tuple[any, ...]) -> bool:
+            if not isinstance(item, tuple):
+                return False
+            if len(item) != len(element_types):
+                return False
+            for i in range(len(item)):
+                if not isinstance(item[i], element_types[i]):
+                    return False
+
+            return True
+
+        def add_content(item: any):
+            if isinstance(item, QWidget):
+                layout.addWidget(item)
+            elif isinstance(item, QLayout):
+                layout.addChildLayout(item)
+            elif isinstance(item, str):
+                layout.addWidget(QLabel(item))
+            elif item_is_tuple(item, (str | QWidget, QWidget | QLayout)):
+                layout.addRow(item[0], item[1])
+            elif item_is_tuple(item, (str | QWidget, str)):
+                layout.addRow(item[0], QLabel(item[1]))
+
+        for item in contents:
+            add_content(item)
+
+
+

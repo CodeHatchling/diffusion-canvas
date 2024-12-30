@@ -18,7 +18,7 @@ from diffusion_canvas_api import DiffusionCanvasAPI
 from layer import Layer
 
 from ui_utils import ExceptionCatcher
-from ui_widgets import Slider
+from ui_widgets import Slider, HelpBox
 
 from common import *
 
@@ -100,9 +100,12 @@ class NoiseBrushTool(BaseBrushTool):
         sliders_layout = QFormLayout(sliders_widget)
 
         # Add a help message:
-        sliders_layout.addRow("Left click", QLabel("Add noise"))
-        sliders_layout.addRow("Ctrl+Left click", QLabel("Remove noise"))
-        sliders_layout.addRow("Right click", QLabel("Denoise"))
+        help_box = HelpBox([
+            ("Left click", "Add noise"),
+            ("Ctrl+Left click", "Remove noise"),
+            ("Right click", "Denoise"),
+        ])
+        sliders_layout.addRow(help_box)
 
         # Add sliders:
         self.slider_noise_brush_radius = Slider(
@@ -272,8 +275,11 @@ class LatentBrushTool(BaseBrushTool):
         sliders_layout = QFormLayout(sliders_widget)
 
         # Add a help message:
-        sliders_layout.addRow("Left click", QLabel("Paint Color"))
-        sliders_layout.addRow("Right click", QLabel("Select Color with Eyedropper"))
+        help_box = HelpBox([
+            ("Left click", "Paint color"),
+            ("Right click", "Select color with eyedropper"),
+        ])
+        sliders_layout.addRow(help_box)
 
         # Add a blend mode dropdown:
         self.blend_mode_combo = QComboBox()
@@ -360,8 +366,8 @@ class LatentBrushTool(BaseBrushTool):
 
 class ShiftBrushTool(BaseBrushTool):
     _color_mode: bool
-    _color_shift_mode_widgets: list[tuple[str, QWidget]]
-    _shift_mode_widgets: list[tuple[str, QWidget]]
+    _color_shift_mode_widgets: list[tuple[str | None, QWidget]]
+    _shift_mode_widgets: list[tuple[str | None, QWidget]]
 
     def __init__(self,
                  api,
@@ -380,21 +386,21 @@ class ShiftBrushTool(BaseBrushTool):
 
     @staticmethod
     def _add_widget(
-            widget_list: list[tuple[str, QWidget]],
-            label: str,
+            widget_list: list[tuple[str | None, QWidget]],
+            label: str | None,
             widget: QWidget) -> None:
         widget_list.append((label, widget))
 
     @staticmethod
     def _add_slider(
-            widget_list: list[tuple[str, QWidget]],
+            widget_list: list[tuple[str | None, QWidget]],
             slider: Slider) -> None:
         widget_list.append((slider.label, slider))
 
     def _create_tool_settings_dock_widget(self) -> QWidget:
         self._color_mode = True
-        self._color_shift_mode_widgets: list[tuple[str, QWidget]] = []
-        self._shift_mode_widgets: list[tuple[str, QWidget]] = []
+        self._color_shift_mode_widgets: list[tuple[str | None, QWidget]] = []
+        self._shift_mode_widgets: list[tuple[str | None, QWidget]] = []
 
         sliders_widget = QWidget()
         self._sliders_layout = QFormLayout(sliders_widget)
@@ -472,8 +478,11 @@ class ShiftBrushTool(BaseBrushTool):
         # Add toggle between modes.
         self._add_widget(self._color_shift_mode_widgets, "Paint Mode", self.paint_mode_toggle)
         # Add a help message:
-        self._add_widget(self._color_shift_mode_widgets, "Left click", QLabel("Paint and Shift"))
-        self._add_widget(self._color_shift_mode_widgets, "Right click", QLabel("Select Color with Eyedropper"))
+        help_box = HelpBox([
+            ("Left click", "Paint and shift"),
+            ("Right click", "Select color with eyedropper"),
+        ])
+        self._add_widget(self._color_shift_mode_widgets, None, help_box)
         # Add sliders:
         self._add_widget(self._color_shift_mode_widgets, "Blend Mode", self.blend_mode_combo)
         self._add_slider(self._color_shift_mode_widgets, self.slider_brush_radius)
@@ -489,7 +498,10 @@ class ShiftBrushTool(BaseBrushTool):
         # Add toggle between modes.
         self._add_widget(self._shift_mode_widgets, "Paint Mode", self.paint_mode_toggle)
         # Add a help message:
-        self._add_widget(self._shift_mode_widgets, "Left click", QLabel("Shift"))
+        help_box = HelpBox([
+            ("Left click", "Shift")
+        ])
+        self._add_widget(self._shift_mode_widgets, None, help_box)
         # Add sliders:
         self._add_slider(self._shift_mode_widgets, self.slider_brush_radius)
         self._add_slider(self._shift_mode_widgets, self.slider_noise_brush_intensity)
@@ -510,14 +522,17 @@ class ShiftBrushTool(BaseBrushTool):
             if item.widget():
                 item.widget().setParent(None)  # Detach the widget from the layout
 
-        widgets_list: list[tuple[str, QWidget]] = (
+        widgets_list: list[tuple[str | None, QWidget]] = (
             self._color_shift_mode_widgets
             if self._color_mode
             else self._shift_mode_widgets
         )
 
         for label, widget in widgets_list:
-            self._sliders_layout.addRow(label, widget)
+            if label is None:
+                self._sliders_layout.addRow(widget)
+            else:
+                self._sliders_layout.addRow(label, widget)
 
     def _on_toggle_paint_mode(self):
         self._color_mode = self.paint_mode_toggle.isChecked()

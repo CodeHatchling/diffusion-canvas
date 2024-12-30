@@ -143,6 +143,8 @@ class ParamsWidget(QWidget):
             # Vertical layout for rename and delete buttons
             small_button_layout = QVBoxLayout()
             small_button_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            small_button_layout.setSpacing(0)
+            small_button_layout.setContentsMargins(0, 0, 0, 0)
 
             # Edit button
             rename_button = QPushButton("📝", self)

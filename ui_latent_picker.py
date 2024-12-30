@@ -108,12 +108,12 @@ class ColorPickerWidget(QWidget):
 
         slider_preview_layout.addWidget(self._color_preview)
         slider_preview_layout.addLayout(sliders_layout)
-        slider_preview_layout.setSpacing(0)
+        slider_preview_layout.setSpacing(10)
         slider_preview_layout.setContentsMargins(0, 0, 0, 0)
 
         overall_layout.addLayout(slider_preview_layout)
         overall_layout.addLayout(swatches_layout)
-        overall_layout.setSpacing(0)
+        overall_layout.setSpacing(10)
         overall_layout.setContentsMargins(0, 0, 0, 0)
 
         self.setLayout(overall_layout)
