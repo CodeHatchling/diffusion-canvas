@@ -68,7 +68,7 @@ PLANNED FEATURES/FIXES:
   - Deghosting. When painting in a texture, the transition zones are noised and denoised.
 - CFG Scale slider.
 - A "denoise all" checkbox for the noise/denoise brush. (Work-around: enter a large value like 99999.)
-- Pages for color swatches. Currently they all pile up under the color picker without limit. 
+- ✅ Pages for color swatches. Currently they all pile up under the color picker without limit. 
 - Branched undo history.
 - Save/load encoded latent data. This can be used to avoid the loss that decoding and encoding causes.
 - Save/load params palette.
