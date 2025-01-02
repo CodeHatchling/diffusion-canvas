@@ -66,6 +66,7 @@ PLANNED FEATURES/FIXES:
   - Texture brush. Upload an image that can be used as a source, options for tiling and random offsets.
   - Custom: Any combination of the above features; source latents, offset, tiling, etc.
   - Deghosting. When painting in a texture, the transition zones are noised and denoised.
+- CFG Scale slider.
 - A "denoise all" checkbox for the noise/denoise brush. (Work-around: enter a large value like 99999.)
 - Pages for color swatches. Currently they all pile up under the color picker without limit. 
 - Branched undo history.
