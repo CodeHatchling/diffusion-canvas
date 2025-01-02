@@ -71,8 +71,11 @@ class ColorPickerSwatch(QPushButton):
         self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(self._label)
 
-    def set_image(self, pixmap: QPixmap):
-        self._label.setPixmap(pixmap)
+    def set_image(self, pixmap: QPixmap | None):
+        if pixmap is None:  # It should accept none, but it doesn't?
+            self._label.clear()
+        else:
+            self._label.setPixmap(pixmap)
 
 
 class ColorPickerSwatches(QFrame):
@@ -99,10 +102,18 @@ class ColorPickerSwatches(QFrame):
 
         self._swatch_buttons: list[ColorPickerSwatch] = []
 
-        for i in range(grid_size[0] * grid_size[1]):
+        for i in range(self._page_size):
             widget = ColorPickerSwatch()
             widget.clicked.connect(lambda _, swatch_button_index=i: self.on_swatch_clicked(swatch_button_index))
+            widget.setEnabled(False)
             self._swatch_buttons.append(widget)
+            column = i % self._grid_size[0]
+            row = i // self._grid_size[0]
+            self.swatches_layout.addWidget(
+                widget,
+                row, column,
+                alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            )
 
         # Add the page change buttons.
         def change_page(increment: int):
@@ -176,24 +187,16 @@ class ColorPickerSwatches(QFrame):
     def update_palette(self):
         # Update the swatch preview images.
         for i in range(self._page_size):
-            # Remove the widget. We may add it back in.
-            self._swatch_buttons[i].setParent(None)
-
             value_index = self._button_index_to_value_index(i)
-            if not self._value_index_in_range(value_index):
-                continue
-
-            column = i % self._grid_size[0]
-            row = i // self._grid_size[0]
-            self.swatches_layout.addWidget(
-                self._swatch_buttons[i],
-                row, column,
-                alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
-            )
-            value = self._latent_values_by_index[value_index]
-            pixmap = self._swatch_data[value]
             button = self._swatch_buttons[i]
-            button.set_image(pixmap)
+            if self._value_index_in_range(value_index):
+                button.setEnabled(True)
+                value = self._latent_values_by_index[value_index]
+                pixmap = self._swatch_data[value]
+                button.set_image(pixmap)
+            else:
+                button.setEnabled(False)
+                button.set_image(None)
 
 
 class ColorPickerWidget(QWidget):
@@ -253,6 +256,9 @@ class ColorPickerWidget(QWidget):
         # overall_layout.setContentsMargins(0, 0, 0, 0)
 
         self.setLayout(overall_layout)
+
+        # Assign the picture initially.
+        self._on_slider_changed()
 
     def _on_slider_changed(self):
         self.update_preview(self._get_current_latent_value())
