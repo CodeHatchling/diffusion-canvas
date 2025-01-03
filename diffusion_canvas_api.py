@@ -190,9 +190,15 @@ class DiffusionCanvasAPI:
 
     @torch.no_grad()
     def create_empty_layer(self, latent_width: int, latent_height: int):
-        clean = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width), dtype=torch.float32, device=shared.device)
-        noisy = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width), dtype=torch.float32, device=shared.device)
-        amp = torch.zeros(size=(1, 1, latent_height, latent_width), dtype=torch.float32, device=shared.device)
+        clean = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width),
+                            dtype=torch.float32,
+                            device=shared.device)
+        noisy = torch.zeros(size=(1, latent_channel_count, latent_height, latent_width),
+                            dtype=torch.float32,
+                            device=shared.device)
+        amp = torch.zeros(size=(1, 1, latent_height, latent_width),
+                          dtype=torch.float32,
+                          device=shared.device)
         return Layer(
             clean,
             noisy,
@@ -263,7 +269,12 @@ class DiffusionCanvasAPI:
             device=latent.device
         )
 
-        image_tensor_shape = (1, color_channel_count, latent.shape[2]*latent_size_in_pixels, latent.shape[3]*latent_size_in_pixels)
+        image_tensor_shape = (
+            1,
+            color_channel_count,
+            latent.shape[2]*latent_size_in_pixels,
+            latent.shape[3]*latent_size_in_pixels
+        )
         image_tensor = torch.zeros(size=image_tensor_shape, dtype=latent.dtype, device=latent.device)
 
         for tile_index in tiles.enumerate_tiles():
@@ -286,7 +297,9 @@ class DiffusionCanvasAPI:
         height = int(np.maximum(1, np.ceil(height / latent_size_in_pixels)))
 
         sigma = 20
-        latent = torch.randn(size=(1, latent_channel_count, height, width), dtype=torch.float32, device=shared.device) * sigma
+        latent = torch.randn(size=(1, latent_channel_count, height, width),
+                             dtype=torch.float32,
+                             device=shared.device) * sigma
 
         for i in range(steps):
             sigma_to_remove = (i+1) / steps
