@@ -316,14 +316,14 @@ class DiffusionCanvasAPI:
 
     @staticmethod
     @torch.no_grad()
-    def _get_blended(layer: Layer,
-                     value: tuple[float, float, float, float],
+    def _get_blended(source: torch.Tensor,
+                     destination: torch.Tensor,
                      alpha: torch.Tensor,
                      blend_mode: 'DiffusionCanvasAPI.BlendMode'):
         """
         Args:
-            layer: Layer to which the blending procedure is applied.
-            value: The current latent color to blend.
+            source: The source tensor.
+            destination: The destination tensor.
             alpha: Opacity mask.
             blend_mode: The current blend mode.
 
@@ -332,24 +332,27 @@ class DiffusionCanvasAPI:
         """
 
         if blend_mode == DiffusionCanvasAPI.BlendMode.Add:
-            solid = layer.create_solid_latent(value)
-            return solid * alpha + layer.clean_latent
+            return source * alpha + destination
 
         elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
-            average = layer.get_average_latent(alpha)
-            difference = tuple(v - a for v, a in zip(value, average))
-            solid = layer.create_solid_latent(difference)
-            return solid * alpha + layer.clean_latent
+            source_avg = DiffusionCanvasAPI.get_average_latent(source, alpha)
+            dest_avg = DiffusionCanvasAPI.get_average_latent(destination, alpha)
+            difference = tuple(v - a for v, a in zip(source_avg, dest_avg))
+            solid = DiffusionCanvasAPI.create_solid_latent(
+                difference,
+                destination.shape,
+                destination.dtype,
+                destination.device)
+            return solid * alpha + destination
 
         else:
-            solid = layer.create_solid_latent(value)
-            return solid * alpha + layer.clean_latent * (1-alpha)
+            return source * alpha + destination * (1-alpha)
 
     @torch.no_grad()
     def draw_latent_dab(self,
                         layer: Layer,
                         blend_mode: 'DiffusionCanvasAPI.BlendMode',
-                        value: tuple[float, float, float, float],
+                        source_latent: torch.Tensor,
                         position_xy: tuple[float, float],
                         pixel_radius: float,
                         opacity: float) -> Bounds2D:
@@ -372,13 +375,48 @@ class DiffusionCanvasAPI:
             mode="blend"
         ).to(layer.clean_latent.device)
 
-        layer.replace_clean_latent(self._get_blended(layer, value, alpha, blend_mode))
+        layer.replace_clean_latent(self._get_blended(source_latent, layer.clean_latent, alpha, blend_mode))
 
         return _get_brush_bounds(
             (latent_x, latent_y),
             latent_radius,
             (layer.clean_latent.shape[3], layer.clean_latent.shape[2])
         )
+
+    @staticmethod
+    @torch.no_grad()
+    def get_average_latent(source, mask) -> tuple[float, ...]:
+        if isinstance(mask, torch.Tensor):
+            mask_mean = mask.mean().squeeze().item()
+
+            if mask_mean > 0:
+                masked = source * mask
+                average = masked.mean(dim=(0, 2, 3)) / mask_mean
+            else:
+                average = source.mean(dim=(0, 2, 3))
+        else:
+            average = source.mean(dim=(0, 2, 3))
+
+        # Convert to (float, float, float, float) tuple
+        result = tuple(average.tolist())
+
+        return result
+
+    @staticmethod
+    @torch.no_grad()
+    def create_solid_latent(
+            value: tuple[float, ...],
+            shape: tuple[int, ...],
+            dtype: torch.dtype,
+            device: torch.device) -> tuple[float, ...]:
+
+        # Create a tensor with the provided shape, where each channel is set to value[channel]
+        value_tensor = torch.tensor(
+            value,
+            dtype=dtype,
+            device=device
+        ).view(1, -1, 1, 1)
+        return value_tensor.expand(shape)  # Broadcast to match desired shape
 
     @torch.no_grad()
     def get_average_latent(self,
@@ -610,7 +648,7 @@ class DiffusionCanvasAPI:
                              params,
                              layer: Layer,
                              blend_mode: 'DiffusionCanvasAPI.BlendMode',
-                             value: tuple[float, float, float, float],
+                             source_tensor: torch.Tensor,
                              position_xy: tuple[float, float],
                              pixel_radius: float,
                              opacity: float,
@@ -677,7 +715,7 @@ class DiffusionCanvasAPI:
 
         # 1. Apply the blend procedure to the affected area,
         #    and get the amplitude of difference introduced by the change.
-        blended = self._get_blended(layer, value, paint_mask * opacity, blend_mode)
+        blended = self._get_blended(source_tensor, layer.clean_latent, paint_mask * opacity, blend_mode)
 
         #    1.a. Calculate the amplitude of the change from the old to the new.
         difference = layer.clean_latent - blended

@@ -100,16 +100,6 @@ class Layer:
         self.noise_amplitude = noise_amplitude
 
     @torch.no_grad()
-    def create_solid_latent(self, value: (float, float, float, float)):
-        # Create a tensor with the same shape as clean_latent, where each channel is set to value[channel]
-        value_tensor = torch.tensor(
-            value,
-            dtype=self.clean_latent.dtype,
-            device=self.clean_latent.device
-        ).view(1, -1, 1, 1)
-        return value_tensor.expand_as(self.clean_latent)  # Broadcast to match clean_latent shape
-
-    @torch.no_grad()
     def replace_clean_latent(self, new_clean_latent: torch.Tensor):
         """
         Replaces the contents of clean_latent while maintaining the difference to its noisy counterpart.

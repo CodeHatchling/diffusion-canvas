@@ -2,7 +2,6 @@ from typing import Callable
 
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import (
-    QLabel,
     QWidget,
     QDockWidget,
     QPushButton,
@@ -16,6 +15,7 @@ from PyQt6.QtCore import Qt
 
 from diffusion_canvas_api import DiffusionCanvasAPI
 from layer import Layer
+import torch
 
 from ui_utils import ExceptionCatcher
 from ui_widgets import Slider, HelpBox
@@ -262,12 +262,12 @@ class LatentBrushTool(BaseBrushTool):
                  tool_dock_layout: QLayout,
                  tool_settings_dock: QDockWidget,
                  on_tool_button_click: callable,
-                 get_latent_value: Callable[[], tuple[float, float, float, float]],
+                 get_source_latent: Callable[[tuple[int, int]], torch.Tensor],
                  set_latent_value: Callable[[tuple[float, float, float, float]], None]):
 
         super().__init__("🖌️️", tool_dock_layout, tool_settings_dock, on_tool_button_click)
         self._api = api
-        self._get_latent_value = get_latent_value
+        self._get_source_latent = get_source_latent
         self._set_latent_value = set_latent_value
 
     def _create_tool_settings_dock_widget(self) -> QWidget:
@@ -342,7 +342,7 @@ class LatentBrushTool(BaseBrushTool):
             bounds = self._api.draw_latent_dab(
                 layer=layer,
                 blend_mode=self.blend_mode,
-                value=self._get_latent_value(),
+                source_latent=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
                 position_xy=normalized_mouse_coord,
                 pixel_radius=self.brush_radius,
                 opacity=self.brush_opacity
@@ -374,14 +374,14 @@ class ShiftBrushTool(BaseBrushTool):
                  tool_dock_layout: QLayout,
                  tool_settings_dock: QDockWidget,
                  on_tool_button_click: callable,
-                 get_latent_value: Callable[[], tuple[float, float, float, float]],
+                 get_source_latent: Callable[[tuple[int, int]], torch.Tensor],
                  set_latent_value: Callable[[tuple[float, float, float, float]], None]):
 
         super().__init__("✨️️", tool_dock_layout, tool_settings_dock, on_tool_button_click)
         self._api = api
         self._color_mode = True
 
-        self._get_latent_value = get_latent_value
+        self._get_source_latent = get_source_latent
         self._set_latent_value = set_latent_value
 
     @staticmethod
@@ -605,7 +605,7 @@ class ShiftBrushTool(BaseBrushTool):
                     params=params,
                     layer=layer,
                     blend_mode=self.blend_mode,
-                    value=self._get_latent_value(),
+                    source_latent=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
                     position_xy=normalized_mouse_coord,
                     pixel_radius=self.brush_radius,
                     opacity=self.brush_opacity,
