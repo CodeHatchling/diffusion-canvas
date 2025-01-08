@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QFrame, QSizePolicy, QTabWidget
 )
 
-from ui_widgets import Slider
+from ui_widgets import Slider, VerticalScrollArea, ImageButton
 from diffusion_canvas_api import latent_channel_count
 
 """
@@ -53,29 +53,12 @@ class ColorPickerLatentPreview(QLabel):
         return QSize(64, 64)
 
 
-class ColorPickerSwatch(QPushButton):
+class ColorPickerSwatch(ImageButton):
     def __init__(self, parent=None):
         super().__init__(parent)
-
         self.latent_value: tuple[float, ...] = (0, 0, 0, 0)
-
         self.setFixedWidth(40)
         self.setFixedHeight(40)
-
-        layout = QHBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        self.setLayout(layout)
-
-        self._label = QLabel()
-        self._label.setScaledContents(True)
-        self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        layout.addWidget(self._label)
-
-    def set_image(self, pixmap: QPixmap | None):
-        if pixmap is None:  # It should accept none, but it doesn't?
-            self._label.clear()
-        else:
-            self._label.setPixmap(pixmap)
 
 
 class ColorPickerSwatches(QFrame):
@@ -294,11 +277,111 @@ class ColorPickerWidget(QWidget):
         self.update_preview(value)
 
 
+class HistoryPickerWidget(VerticalScrollArea):
+
+    class HistoryItem:
+        image: QPixmap | None
+
+        def __init__(self, image: QPixmap | None):
+            self.image = image
+
+    class HistoryInfo:
+        item_count: int
+
+        def __init__(self, item_count: int):
+            self.item_count = item_count
+
+    def __init__(self,
+                 get_history_item_func: Callable[[int], HistoryItem],
+                 get_history_info_func: Callable[[], HistoryInfo],
+                 parent=None):
+        super().__init__(parent)
+
+        self._get_history_item_func: Callable[[int], HistoryPickerWidget.HistoryItem] = get_history_item_func
+        self._get_history_info_func: Callable[[], HistoryPickerWidget.HistoryInfo] = get_history_info_func
+
+        contents_widget = QWidget()
+        self._contents_layout = QVBoxLayout(contents_widget)
+        contents_widget.setLayout(self._contents_layout)
+        self.setWidget(contents_widget)
+
+        self.buttons: list[ImageButton] = []
+
+        self.selected_index: int = -1
+
+    def on_history_changed(self):
+        history_info = self._get_history_info_func()
+
+        def append_button(_index: int) -> ImageButton:
+            _button = ImageButton()
+            _button.clicked.connect(lambda _, _i=_index: self._on_clicked_button(_i))
+            self.buttons.append(_button)
+            self._contents_layout.addWidget(_button)
+            return _button
+
+        def update_button(_button: ImageButton, _index: int) -> None:
+            _info = self._get_history_item_func(_index)
+            _button.setEnabled(True)
+            _button.set_image(_info.image)
+            if _info.image is not None:
+                _button.setFixedSize(_info.image.width(), _info.image.height())
+            _button.show()
+
+        def hide_button(_index: int) -> None:
+            _button = self.buttons[_index]
+            _button.hide()
+            _button.set_image(None)
+            _button.setEnabled(False)
+
+        max_index = max(history_info.item_count, len(self.buttons))
+        for i in range(max_index):
+            history_info_exists = i < history_info.item_count
+            button_slot_exists = i < len(self.buttons)
+
+            if history_info_exists:
+                if not button_slot_exists:
+                    button = append_button(i)
+                else:
+                    button = self.buttons[i]
+
+                update_button(button, i)
+            else:
+                if button_slot_exists:
+                    hide_button(i)
+
+    def _on_clicked_button(self, index: int):
+        self.selected_index = index
+
+
 class LatentPicker(QTabWidget):
+    class SolidLatent:
+        def __init__(self, latent_value: tuple[float, ...]):
+            self.latent_value = latent_value
+
+    class HistoryLatent:
+        def __init__(self, history_index: int):
+            self.history_index = history_index
+
     def __init__(self,
                  generate_preview_func: Callable[[tuple[float, float, float, float]], QPixmap],
+                 get_history_item_func: Callable[[int], HistoryPickerWidget.HistoryItem],
+                 get_history_info_func: Callable[[], HistoryPickerWidget.HistoryInfo],
                  parent=None):
         super().__init__(parent)
 
         self.color_picker = ColorPickerWidget(generate_preview_func, parent=self)
         self.addTab(self.color_picker, "Solid Latent")
+
+        self.history_picker = HistoryPickerWidget(get_history_item_func, get_history_info_func, parent=self)
+        self.addTab(self.history_picker, "Undo History")
+
+    def get_latent_info(self) -> SolidLatent | HistoryLatent:
+        selected_tab = self.currentIndex()
+
+        if selected_tab == 0:
+            return LatentPicker.SolidLatent(self.color_picker.use_current_latent_value())
+        elif selected_tab == 1:
+            return LatentPicker.HistoryLatent(self.history_picker.selected_index)
+        else:
+            # TODO add more modes.
+            return LatentPicker.SolidLatent(self.color_picker.use_current_latent_value())

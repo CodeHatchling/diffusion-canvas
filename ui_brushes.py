@@ -342,7 +342,7 @@ class LatentBrushTool(BaseBrushTool):
             bounds = self._api.draw_latent_dab(
                 layer=layer,
                 blend_mode=self.blend_mode,
-                source_latent=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
+                source_tensor=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
                 position_xy=normalized_mouse_coord,
                 pixel_radius=self.brush_radius,
                 opacity=self.brush_opacity
@@ -366,6 +366,7 @@ class LatentBrushTool(BaseBrushTool):
 
 class ShiftBrushTool(BaseBrushTool):
     _color_mode: bool
+    _blend_transitions: bool
     _color_shift_mode_widgets: list[tuple[str | None, QWidget]]
     _shift_mode_widgets: list[tuple[str | None, QWidget]]
 
@@ -399,6 +400,7 @@ class ShiftBrushTool(BaseBrushTool):
 
     def _create_tool_settings_dock_widget(self) -> QWidget:
         self._color_mode = True
+        self._blend_transitions = False
         self._color_shift_mode_widgets: list[tuple[str | None, QWidget]] = []
         self._shift_mode_widgets: list[tuple[str | None, QWidget]] = []
 
@@ -447,6 +449,11 @@ class ShiftBrushTool(BaseBrushTool):
         self.blend_mode_combo.addItems(
             [mode.name for mode in DiffusionCanvasAPI.BlendMode]
         )
+
+        self.blend_transitions_toggle = QCheckBox()
+        self.blend_transitions_toggle.setCheckState(Qt.CheckState.Unchecked)
+        self.blend_transitions_toggle.stateChanged.connect(self._on_toggle_transitions_mode)
+
         self.slider_brush_opacity = Slider(
             "Brush Opacity",
             1.0,
@@ -485,6 +492,7 @@ class ShiftBrushTool(BaseBrushTool):
         self._add_widget(self._color_shift_mode_widgets, None, help_box)
         # Add sliders:
         self._add_widget(self._color_shift_mode_widgets, "Blend Mode", self.blend_mode_combo)
+        self._add_widget(self._color_shift_mode_widgets, "Transitions Only", self.blend_transitions_toggle)
         self._add_slider(self._color_shift_mode_widgets, self.slider_brush_radius)
         self._add_slider(self._color_shift_mode_widgets, self.slider_brush_opacity)
         self._add_slider(self._color_shift_mode_widgets, self.slider_noise_scale)
@@ -537,6 +545,9 @@ class ShiftBrushTool(BaseBrushTool):
     def _on_toggle_paint_mode(self):
         self._color_mode = self.paint_mode_toggle.isChecked()
         self._populate_dock_layout()
+
+    def _on_toggle_transitions_mode(self):
+        self._blend_transitions = self.blend_transitions_toggle.isChecked()
 
     def _get_blend_mode(self) -> DiffusionCanvasAPI.BlendMode:
         index = self.blend_mode_combo.currentIndex()
@@ -605,7 +616,8 @@ class ShiftBrushTool(BaseBrushTool):
                     params=params,
                     layer=layer,
                     blend_mode=self.blend_mode,
-                    source_latent=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
+                    blend_transitions=self._blend_transitions,
+                    source_tensor=self._get_source_latent((layer.clean_latent.shape[3], layer.clean_latent.shape[2])),
                     position_xy=normalized_mouse_coord,
                     pixel_radius=self.brush_radius,
                     opacity=self.brush_opacity,

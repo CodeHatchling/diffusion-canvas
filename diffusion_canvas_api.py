@@ -335,8 +335,8 @@ class DiffusionCanvasAPI:
             return source * alpha + destination
 
         elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
-            source_avg = DiffusionCanvasAPI.get_average_latent(source, alpha)
-            dest_avg = DiffusionCanvasAPI.get_average_latent(destination, alpha)
+            source_avg = DiffusionCanvasAPI.get_average_latent_masked(source, alpha)
+            dest_avg = DiffusionCanvasAPI.get_average_latent_masked(destination, alpha)
             difference = tuple(v - a for v, a in zip(source_avg, dest_avg))
             solid = DiffusionCanvasAPI.create_solid_latent(
                 difference,
@@ -352,7 +352,7 @@ class DiffusionCanvasAPI:
     def draw_latent_dab(self,
                         layer: Layer,
                         blend_mode: 'DiffusionCanvasAPI.BlendMode',
-                        source_latent: torch.Tensor,
+                        source_tensor: torch.Tensor,
                         position_xy: tuple[float, float],
                         pixel_radius: float,
                         opacity: float) -> Bounds2D:
@@ -375,7 +375,7 @@ class DiffusionCanvasAPI:
             mode="blend"
         ).to(layer.clean_latent.device)
 
-        layer.replace_clean_latent(self._get_blended(source_latent, layer.clean_latent, alpha, blend_mode))
+        layer.replace_clean_latent(self._get_blended(source_tensor, layer.clean_latent, alpha, blend_mode))
 
         return _get_brush_bounds(
             (latent_x, latent_y),
@@ -385,7 +385,7 @@ class DiffusionCanvasAPI:
 
     @staticmethod
     @torch.no_grad()
-    def get_average_latent(source, mask) -> tuple[float, ...]:
+    def get_average_latent_masked(source, mask) -> tuple[float, ...]:
         if isinstance(mask, torch.Tensor):
             mask_mean = mask.mean().squeeze().item()
 
@@ -408,7 +408,7 @@ class DiffusionCanvasAPI:
             value: tuple[float, ...],
             shape: tuple[int, ...],
             dtype: torch.dtype,
-            device: torch.device) -> tuple[float, ...]:
+            device: torch.device) -> torch.Tensor:
 
         # Create a tensor with the provided shape, where each channel is set to value[channel]
         value_tensor = torch.tensor(
@@ -648,6 +648,7 @@ class DiffusionCanvasAPI:
                              params,
                              layer: Layer,
                              blend_mode: 'DiffusionCanvasAPI.BlendMode',
+                             blend_transitions: bool,
                              source_tensor: torch.Tensor,
                              position_xy: tuple[float, float],
                              pixel_radius: float,
@@ -704,18 +705,21 @@ class DiffusionCanvasAPI:
             mode="blend"
         ).to(shared.device)
 
-        noise_mask = self._brushes.draw_dab(
-            torch.zeros_like(layer.noise_amplitude),
-            (latent_x, latent_y_flipped),
-            noise_latent_radius,
-            (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
-            opacity=1,
-            mode="blend"
-        ).to(shared.device)
+        if blend_transitions:
+            noise_mask = (1.0 - torch.abs(paint_mask - 0.5)) * 2.0
+        else:
+            noise_mask = self._brushes.draw_dab(
+                torch.zeros_like(layer.noise_amplitude),
+                (latent_x, latent_y_flipped),
+                noise_latent_radius,
+                (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
+                opacity=opacity,
+                mode="blend"
+            ).to(shared.device)
 
         # 1. Apply the blend procedure to the affected area,
         #    and get the amplitude of difference introduced by the change.
-        blended = self._get_blended(source_tensor, layer.clean_latent, paint_mask * opacity, blend_mode)
+        blended = self._get_blended(source_tensor, layer.clean_latent, paint_mask, blend_mode)
 
         #    1.a. Calculate the amplitude of the change from the old to the new.
         difference = layer.clean_latent - blended
@@ -728,7 +732,10 @@ class DiffusionCanvasAPI:
         difference = difference.mean().squeeze().item()
 
         #    1.c. Scale the difference by the mask.
-        average_mask_value = paint_mask.mean().squeeze().item()
+        if blend_transitions:
+            average_mask_value = noise_mask.mean().squeeze().item()
+        else:
+            average_mask_value = paint_mask.mean().squeeze().item()
         if average_mask_value > 0:
             difference /= average_mask_value
 
@@ -770,7 +777,7 @@ class DiffusionCanvasAPI:
         return total_bounds
 
     def generate_solid_latent(self,
-                              latent_value: tuple[float, float, float, float],
+                              latent_value: tuple[float, ...],
                               size_latents: tuple[int, int],
                               dest_type):
         # Create a tensor with the same shape as clean_latent, where each channel is set to value[channel]

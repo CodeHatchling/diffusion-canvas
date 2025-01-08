@@ -1,5 +1,7 @@
 import math
 
+from PyQt6.QtGui import QPixmap
+
 import numpy as np
 import torch
 from typing import Callable
@@ -271,23 +273,61 @@ class Layer:
 
 
 class History:
-    def __init__(self, init_layer: Layer):
+
+    class _Item:
+        layer: Layer
+        thumbnail: QPixmap | None
+
+        def __init__(self, layer: Layer, thumbnail: QPixmap | None):
+            self.layer = layer
+            self.thumbnail = thumbnail
+
+    def __init__(self, init_layer: Layer, thumbnail: QPixmap | None):
         self._undo_index: int = 0
-        self._undo_stack: list[Layer] = [init_layer]
+        self._undo_stack: list[History._Item] = [History._Item(init_layer, thumbnail)]
+
+    def __len__(self):
+        return len(self._undo_stack)
+
+    def __getitem__(self, item: int) -> Layer | None:
+        item_count = len(self._undo_stack)
+        if item_count == 0:
+            return None
+
+        if item >= len(self._undo_stack):
+            item = len(self._undo_stack)-1
+
+        if item <= -item_count:
+            item = 1-item_count
+
+        return self._undo_stack[item].layer
+
+    def get_thumbnail(self, index: int) -> QPixmap | None:
+        item_count = len(self._undo_stack)
+        if item_count == 0:
+            return None
+
+        if index >= len(self._undo_stack):
+            index = len(self._undo_stack) - 1
+
+        if index <= -item_count:
+            index = 1 - item_count
+
+        return self._undo_stack[index].thumbnail
 
     def _get_layer(self) -> Layer:
-        return self._undo_stack[self._undo_index]
+        return self._undo_stack[self._undo_index].layer
 
     layer = property(fget=_get_layer)
 
-    def register_undo(self):
-        current_layer = self._undo_stack[self._undo_index]
+    def register_undo(self, thumbnail: QPixmap):
+        current_item = self._undo_stack[self._undo_index]
 
         # Remove the current layer from the stack, and all "redo" steps ahead of it.
         self._undo_stack = self._undo_stack[0:self._undo_index]
 
         # Add a clone of the current state we can switch back to, AND the active state.
-        self._undo_stack += [current_layer.clone(), current_layer]
+        self._undo_stack += [History._Item(current_item.layer.clone(), thumbnail), current_item]
 
         self._undo_index = len(self._undo_stack) - 1
 

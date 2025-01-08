@@ -40,7 +40,7 @@ from ui_params import ParamsWidget
 from ui_dialogs import NewCanvasDialog
 from ui_brushes import BaseBrushTool, NoiseBrushTool, LatentBrushTool, ShiftBrushTool
 from ui_canvas import Canvas
-from ui_latent_picker import LatentPicker
+from ui_latent_picker import LatentPicker, HistoryPickerWidget
 
 from common import *
 
@@ -52,6 +52,7 @@ class DiffusionCanvasWindow(QMainWindow):
     dirty_region_full: Bounds2D | None
     dirty_region_quick: Bounds2D | None
     history: History
+    next_undo_region: Bounds2D | None
     create_undo: bool
 
     def __init__(self):
@@ -139,10 +140,20 @@ class DiffusionCanvasWindow(QMainWindow):
             )
             return QPixmap.fromImage(image)
 
+        def get_history_info() -> HistoryPickerWidget.HistoryInfo:
+            return HistoryPickerWidget.HistoryInfo(len(self.history))
+
+        def get_history_item(index: int) -> HistoryPickerWidget.HistoryItem:
+            return HistoryPickerWidget.HistoryItem(self.history.get_thumbnail(index))
+
         latent_picker_dock = QDockWidget("Latent Picker", self)
         latent_picker_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        latent_picker_widget = LatentPicker(get_latent_preview)
-        latent_picker_dock.setWidget(latent_picker_widget)
+        self.latent_picker_widget = LatentPicker(
+            get_history_info_func=get_history_info,
+            get_history_item_func=get_history_item,
+            generate_preview_func=get_latent_preview,
+            parent=latent_picker_dock)
+        latent_picker_dock.setWidget(self.latent_picker_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, latent_picker_dock)
 
         # Dock widget for tool settings
@@ -167,8 +178,8 @@ class DiffusionCanvasWindow(QMainWindow):
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
             on_tool_button_click=lambda: set_current_tool(self.latent_brush_tool),
-            get_latent_value=lambda: latent_picker_widget.color_picker.use_current_latent_value(),
-            set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
+            get_source_latent=self._get_brush_source_latent,
+            set_latent_value=lambda x: self.latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 
         self.shift_brush_tool = ShiftBrushTool(
@@ -176,8 +187,8 @@ class DiffusionCanvasWindow(QMainWindow):
             tool_dock_layout=tool_layout,
             tool_settings_dock=tool_settings_dock,
             on_tool_button_click=lambda: set_current_tool(self.shift_brush_tool),
-            get_latent_value=lambda: latent_picker_widget.color_picker.use_current_latent_value(),
-            set_latent_value=lambda x: latent_picker_widget.color_picker.set_current_latent_value(x)
+            get_source_latent=self._get_brush_source_latent,
+            set_latent_value=lambda x: self.latent_picker_widget.color_picker.set_current_latent_value(x)
         )
 
         # Setup update timer
@@ -196,6 +207,30 @@ class DiffusionCanvasWindow(QMainWindow):
         self.drag_button = None
 
         self.initialize_canvas(self.api.create_empty_layer(512//latent_size_in_pixels, 512//latent_size_in_pixels))
+
+    def _get_brush_source_latent(self, latent_size_xy: tuple[int, int]) -> torch.Tensor:
+        info = self.latent_picker_widget.get_latent_info()
+        if isinstance(info, LatentPicker.SolidLatent):
+            return self.api.create_solid_latent(
+                value=info.latent_value,
+                shape=(1, len(info.latent_value), latent_size_xy[1], latent_size_xy[0]),
+                # TODO this way of determining the type and device seems messy.
+                dtype=self.layer.clean_latent.dtype,
+                device=self.layer.clean_latent.device)
+        elif isinstance(info, LatentPicker.HistoryLatent):
+            # TODO: Should we worry about size mismatches?
+            item = self.history[info.history_index]
+            if item is not None and item is not self.layer:
+                return item.clean_latent
+            else:
+                return self.layer.clean_latent.clone()
+        else:
+            return self.api.create_solid_latent(
+                value=(0, 0, 0, 0),
+                shape=(1, 4, latent_size_xy[1], latent_size_xy[0]),
+                # TODO this way of determining the type and device seems messy.
+                dtype=self.layer.clean_latent.dtype,
+                device=self.layer.clean_latent.device)
 
     def initialize_canvas(self, layer: Layer):
         self.show_noisy = False
@@ -221,8 +256,10 @@ class DiffusionCanvasWindow(QMainWindow):
         # Create a PyTorch tensor that shares the same memory
         self.cpu_canvas_image_tensor = torch.from_numpy(numpy_buffer)
 
-        self.history = History(layer)
+        self.history = History(layer, None)
+        self.next_undo_region = None
         self.create_undo = True
+        self.latent_picker_widget.history_picker.on_history_changed()
 
         # Update the display with the new canvas
         self.update_canvas_view(noisy=False, full=True)
@@ -452,7 +489,11 @@ class DiffusionCanvasWindow(QMainWindow):
                                                       event=event,
                                                       normalized_mouse_coord=normalized_position):
             if self.create_undo:
-                self.history.register_undo()
+                # TODO: make an event that is triggered when register_undo is called.
+                # Since this is the only call site, it's no big deal.
+                self.history.register_undo(thumbnail=self.convert_canvas_image_to_thumbnail(self.next_undo_region))
+                self.next_undo_region = None
+                self.latent_picker_widget.history_picker.on_history_changed()
                 self.create_undo = False
 
             result = self.current_tool.handle_brush_stroke(
@@ -462,6 +503,13 @@ class DiffusionCanvasWindow(QMainWindow):
                 event=event,
                 normalized_mouse_coord=normalized_position
             )
+
+            if isinstance(result.modified_bounds, Bounds2D):
+                self.next_undo_region = (
+                    result.modified_bounds
+                    if self.next_undo_region is None
+                    else self.next_undo_region.get_encapsulated(result.modified_bounds)
+                )
 
             self.update_canvas_view(noisy=result.show_noisy, region=result.modified_bounds, full=False)
 
@@ -627,3 +675,24 @@ class DiffusionCanvasWindow(QMainWindow):
             self.dirty_region_quick = None
         else:
             self.dirty_region_quick = None
+
+    def convert_canvas_image_to_thumbnail(self, bounds_latents: Bounds2D | None):
+        if isinstance(bounds_latents, Bounds2D):
+            # bounds_latents = bounds_latents.get_expanded(4, 4)
+            cropped = self.cpu_canvas_q_image.copy(
+                bounds_latents.x_bounds[0] * latent_size_in_pixels,
+                bounds_latents.y_bounds[0] * latent_size_in_pixels,
+                bounds_latents.span[0] * latent_size_in_pixels,
+                bounds_latents.span[1] * latent_size_in_pixels
+            )
+        else:
+            cropped = self.cpu_canvas_q_image
+
+        scaled = cropped.scaled(
+            min(64, cropped.width()),   # Width
+            min(64, cropped.height()),  # Height
+            Qt.AspectRatioMode.KeepAspectRatio,          # Preserve aspect by shrinking
+            Qt.TransformationMode.SmoothTransformation   # Use antialiasing
+        )
+        return QPixmap.fromImage(scaled)
+

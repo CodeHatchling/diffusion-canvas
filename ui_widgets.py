@@ -1,7 +1,18 @@
-from PyQt6.QtGui import QPaintEvent, QPainter
-from PyQt6.QtWidgets import QWidget, QSlider, QLineEdit, QHBoxLayout, QScrollArea, QFrame, QLabel, QFormLayout, QLayout
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QWidget,
+    QSlider,
+    QLineEdit,
+    QHBoxLayout,
+    QScrollArea,
+    QFrame,
+    QLabel,
+    QFormLayout,
+    QLayout,
+    QPushButton
+)
 
-from PyQt6.QtCore import Qt, QObject, QEvent, QSize
+from PyQt6.QtCore import Qt, QSize
 import math
 import numpy as np
 from ui_utils import ExceptionCatcher
@@ -204,31 +215,48 @@ class HelpBox(QFrame):
         self.setLayout(layout)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        def item_is_tuple(item: any, element_types: tuple[any, ...]) -> bool:
-            if not isinstance(item, tuple):
+        def item_is_tuple(_item: any, element_types: tuple[any, ...]) -> bool:
+            if not isinstance(_item, tuple):
                 return False
-            if len(item) != len(element_types):
+            if len(_item) != len(element_types):
                 return False
-            for i in range(len(item)):
-                if not isinstance(item[i], element_types[i]):
+            for i in range(len(_item)):
+                if not isinstance(_item[i], element_types[i]):
                     return False
 
             return True
 
-        def add_content(item: any):
-            if isinstance(item, QWidget):
-                layout.addWidget(item)
-            elif isinstance(item, QLayout):
-                layout.addChildLayout(item)
-            elif isinstance(item, str):
-                layout.addWidget(QLabel(item))
-            elif item_is_tuple(item, (str | QWidget, QWidget | QLayout)):
-                layout.addRow(item[0], item[1])
-            elif item_is_tuple(item, (str | QWidget, str)):
-                layout.addRow(item[0], QLabel(item[1]))
+        def add_content(_item: any):
+            if isinstance(_item, QWidget):
+                layout.addWidget(_item)
+            elif isinstance(_item, QLayout):
+                layout.addChildLayout(_item)
+            elif isinstance(_item, str):
+                layout.addWidget(QLabel(_item))
+            elif item_is_tuple(_item, (str | QWidget, QWidget | QLayout)):
+                layout.addRow(_item[0], _item[1])
+            elif item_is_tuple(_item, (str | QWidget, str)):
+                layout.addRow(_item[0], QLabel(_item[1]))
 
         for item in contents:
             add_content(item)
 
 
+class ImageButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
 
+        layout = QHBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.setLayout(layout)
+
+        self._label = QLabel()
+        self._label.setScaledContents(True)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._label)
+
+    def set_image(self, pixmap: QPixmap | None):
+        if pixmap is None:  # It should accept none, but it doesn't?
+            self._label.clear()
+        else:
+            self._label.setPixmap(pixmap)
