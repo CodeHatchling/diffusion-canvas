@@ -260,3 +260,59 @@ class ImageButton(QPushButton):
             self._label.clear()
         else:
             self._label.setPixmap(pixmap)
+
+
+class LabelImageButton(QPushButton):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        layout = QFormLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self.setLayout(layout)
+
+        self._text_label = QLabel()
+        self._text_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+
+        self._image_label = QLabel()
+        self._image_label.setScaledContents(True)
+        self._image_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        layout.addRow(self._text_label, self._image_label)
+
+    def set_image(self, pixmap: QPixmap | None):
+        if pixmap is None:  # It should accept none, but it doesn't?
+            self._image_label.clear()
+            self._image_label.setFixedSize(QSize(0, 0))
+        else:
+            self._image_label.setPixmap(pixmap)
+            self._image_label.setFixedSize(pixmap.size())
+        self._reset_min_size()
+
+    def set_text(self, text: str | None):
+        if text is None:
+            self._text_label.clear()
+        else:
+            self._text_label.setText(text)
+        self._reset_min_size()
+
+    def _reset_min_size(self):
+        self.setMinimumSize(self.minimumSizeHint())
+
+    def minimumSizeHint(self) -> QSize:
+        our_min_size = super().minimumSizeHint()
+
+        min_size_text = self._text_label.minimumSizeHint()
+        min_size_image_widget = self._image_label.minimumSizeHint()
+        pixmap = self._image_label.pixmap()
+        min_size_image = pixmap.size() if isinstance(pixmap, QPixmap) else min_size_image_widget
+
+        widgets_total_size = QSize(
+            max(min_size_image_widget.width(), min_size_image.width()) + min_size_text.width(),
+            max(min_size_image_widget.height(), min_size_image.height()) + min_size_text.height(),
+        )
+
+        result_size = QSize(
+            max(our_min_size.width(), widgets_total_size.width()),
+            max(our_min_size.height(), widgets_total_size.height())
+        )
+
+        return result_size

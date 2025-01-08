@@ -28,12 +28,15 @@ def _add_slider(layout, slider):
 
 
 class BrushStrokeInfo:
+    description: str | None
     modified_bounds: Bounds2D | None
     show_noisy: bool
 
     def __init__(self,
+                 description: str | None,
                  modified_bounds: Bounds2D | None,
                  show_noisy: bool):
+        self.description = description
         self.modified_bounds = modified_bounds
         self.show_noisy = show_noisy
 
@@ -232,6 +235,7 @@ class NoiseBrushTool(BaseBrushTool):
                     noise_intensity=self.noise_brush_intensity
                 )
             return BrushStrokeInfo(
+                description="Remove noise" if ctrl_modifier else "Add noise",
                 show_noisy=True,
                 modified_bounds=bounds
             )
@@ -251,6 +255,7 @@ class NoiseBrushTool(BaseBrushTool):
                 time_budget=0.1
             )
             return BrushStrokeInfo(
+                description="Denoise",
                 show_noisy=False,
                 modified_bounds=bounds
             )
@@ -348,6 +353,7 @@ class LatentBrushTool(BaseBrushTool):
                 opacity=self.brush_opacity
             )
             return BrushStrokeInfo(
+                description="Latent brush",
                 show_noisy=False,
                 modified_bounds=bounds
             )
@@ -359,6 +365,7 @@ class LatentBrushTool(BaseBrushTool):
                 pixel_radius=self.brush_radius
             ))
             return BrushStrokeInfo(
+                description="Eyedropper",
                 show_noisy=False,
                 modified_bounds=None
             )
@@ -631,6 +638,7 @@ class ShiftBrushTool(BaseBrushTool):
                     denoise_steps=self.denoise_steps
                 )
                 return BrushStrokeInfo(
+                    description="Paint and shift brush",
                     show_noisy=False,
                     modified_bounds=bounds
                 )
@@ -642,6 +650,7 @@ class ShiftBrushTool(BaseBrushTool):
                     pixel_radius=self.brush_radius
                 ))
                 return BrushStrokeInfo(
+                    description="Eyedropper",
                     show_noisy=False,
                     modified_bounds=None
                 )
@@ -661,6 +670,7 @@ class ShiftBrushTool(BaseBrushTool):
                     denoise_steps=self.denoise_steps
                 )
                 return BrushStrokeInfo(
+                    description="Shift brush",
                     show_noisy=False,
                     modified_bounds=bounds
                 )

@@ -53,6 +53,7 @@ class DiffusionCanvasWindow(QMainWindow):
     dirty_region_quick: Bounds2D | None
     history: History
     next_undo_region: Bounds2D | None
+    next_undo_desc: str | None
     create_undo: bool
 
     def __init__(self):
@@ -144,7 +145,9 @@ class DiffusionCanvasWindow(QMainWindow):
             return HistoryPickerWidget.HistoryInfo(len(self.history))
 
         def get_history_item(index: int) -> HistoryPickerWidget.HistoryItem:
-            return HistoryPickerWidget.HistoryItem(self.history.get_thumbnail(index))
+            return HistoryPickerWidget.HistoryItem(
+                self.history.get_description(index),
+                self.history.get_thumbnail(index))
 
         latent_picker_dock = QDockWidget("Latent Picker", self)
         latent_picker_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
@@ -256,8 +259,9 @@ class DiffusionCanvasWindow(QMainWindow):
         # Create a PyTorch tensor that shares the same memory
         self.cpu_canvas_image_tensor = torch.from_numpy(numpy_buffer)
 
-        self.history = History(layer, None)
+        self.history = History(layer, "Current canvas", None)
         self.next_undo_region = None
+        self.next_undo_desc = "Initial canvas"
         self.create_undo = True
         self.latent_picker_widget.history_picker.on_history_changed()
 
@@ -491,8 +495,9 @@ class DiffusionCanvasWindow(QMainWindow):
             if self.create_undo:
                 # TODO: make an event that is triggered when register_undo is called.
                 # Since this is the only call site, it's no big deal.
-                self.history.register_undo(thumbnail=self.convert_canvas_image_to_thumbnail(self.next_undo_region))
+                self.history.register_undo(description=self.next_undo_desc, thumbnail=self.convert_canvas_image_to_thumbnail(self.next_undo_region))
                 self.next_undo_region = None
+                self.next_undo_desc = None
                 self.latent_picker_widget.history_picker.on_history_changed()
                 self.create_undo = False
 
@@ -510,6 +515,9 @@ class DiffusionCanvasWindow(QMainWindow):
                     if self.next_undo_region is None
                     else self.next_undo_region.get_encapsulated(result.modified_bounds)
                 )
+
+            if isinstance(result.description, str):
+                self.next_undo_desc = result.description
 
             self.update_canvas_view(noisy=result.show_noisy, region=result.modified_bounds, full=False)
 

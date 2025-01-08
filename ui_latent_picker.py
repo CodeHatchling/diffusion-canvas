@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QFrame, QSizePolicy, QTabWidget
 )
 
-from ui_widgets import Slider, VerticalScrollArea, ImageButton
+from ui_widgets import Slider, VerticalScrollArea, ImageButton, LabelImageButton
 from diffusion_canvas_api import latent_channel_count
 
 """
@@ -280,9 +280,11 @@ class ColorPickerWidget(QWidget):
 class HistoryPickerWidget(VerticalScrollArea):
 
     class HistoryItem:
+        text: str | None
         image: QPixmap | None
 
-        def __init__(self, image: QPixmap | None):
+        def __init__(self, text: str | None, image: QPixmap | None):
+            self.text = text
             self.image = image
 
     class HistoryInfo:
@@ -305,26 +307,25 @@ class HistoryPickerWidget(VerticalScrollArea):
         contents_widget.setLayout(self._contents_layout)
         self.setWidget(contents_widget)
 
-        self.buttons: list[ImageButton] = []
+        self.buttons: list[LabelImageButton] = []
 
         self.selected_index: int = -1
 
     def on_history_changed(self):
         history_info = self._get_history_info_func()
 
-        def append_button(_index: int) -> ImageButton:
-            _button = ImageButton()
+        def append_button(_index: int) -> LabelImageButton:
+            _button = LabelImageButton()
             _button.clicked.connect(lambda _, _i=_index: self._on_clicked_button(_i))
             self.buttons.append(_button)
             self._contents_layout.addWidget(_button)
             return _button
 
-        def update_button(_button: ImageButton, _index: int) -> None:
+        def update_button(_button: LabelImageButton, _index: int) -> None:
             _info = self._get_history_item_func(_index)
             _button.setEnabled(True)
             _button.set_image(_info.image)
-            if _info.image is not None:
-                _button.setFixedSize(_info.image.width(), _info.image.height())
+            _button.set_text(_info.text)
             _button.show()
 
         def hide_button(_index: int) -> None:

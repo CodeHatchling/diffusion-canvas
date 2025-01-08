@@ -276,58 +276,68 @@ class History:
 
     class _Item:
         layer: Layer
+        description: str | None
         thumbnail: QPixmap | None
 
-        def __init__(self, layer: Layer, thumbnail: QPixmap | None):
+        def __init__(self, layer: Layer, description: str | None, thumbnail: QPixmap | None):
             self.layer = layer
+            self.description = description
             self.thumbnail = thumbnail
 
-    def __init__(self, init_layer: Layer, thumbnail: QPixmap | None):
+    def __init__(self, init_layer: Layer, description: str | None, thumbnail: QPixmap | None):
         self._undo_index: int = 0
-        self._undo_stack: list[History._Item] = [History._Item(init_layer, thumbnail)]
+        self._undo_stack: list[History._Item] = [History._Item(init_layer, description, thumbnail)]
 
     def __len__(self):
         return len(self._undo_stack)
 
-    def __getitem__(self, item: int) -> Layer | None:
+    def _make_index_safe(self, index: int) -> int | None:
         item_count = len(self._undo_stack)
         if item_count == 0:
             return None
 
-        if item >= len(self._undo_stack):
-            item = len(self._undo_stack)-1
-
-        if item <= -item_count:
-            item = 1-item_count
-
-        return self._undo_stack[item].layer
-
-    def get_thumbnail(self, index: int) -> QPixmap | None:
-        item_count = len(self._undo_stack)
-        if item_count == 0:
-            return None
-
-        if index >= len(self._undo_stack):
-            index = len(self._undo_stack) - 1
+        if index >= item_count:
+            index = item_count - 1
 
         if index <= -item_count:
             index = 1 - item_count
 
+        return index
+
+    def __getitem__(self, item: int) -> Layer | None:
+        item = self._make_index_safe(item)
+        if item is None:
+            return None
+
+        return self._undo_stack[item].layer
+
+    def get_thumbnail(self, index: int) -> QPixmap | None:
+        index = self._make_index_safe(index)
+        if index is None:
+            return None
+
         return self._undo_stack[index].thumbnail
+
+    def get_description(self, index: int) -> str | None:
+        index = self._make_index_safe(index)
+        if index is None:
+            return None
+
+        return self._undo_stack[index].description
 
     def _get_layer(self) -> Layer:
         return self._undo_stack[self._undo_index].layer
 
     layer = property(fget=_get_layer)
 
-    def register_undo(self, thumbnail: QPixmap):
+    def register_undo(self, description: str | None, thumbnail: QPixmap | None):
         current_item = self._undo_stack[self._undo_index]
 
         # Remove the current layer from the stack, and all "redo" steps ahead of it.
         self._undo_stack = self._undo_stack[0:self._undo_index]
 
         # Add a clone of the current state we can switch back to, AND the active state.
-        self._undo_stack += [History._Item(current_item.layer.clone(), thumbnail), current_item]
+        self._undo_stack += [History._Item(current_item.layer.clone(), description, thumbnail), current_item]
 
         self._undo_index = len(self._undo_stack) - 1
 
