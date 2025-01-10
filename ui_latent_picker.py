@@ -304,6 +304,7 @@ class HistoryPickerWidget(VerticalScrollArea):
 
         contents_widget = QWidget()
         self._contents_layout = QVBoxLayout(contents_widget)
+        self._contents_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignVCenter)
         contents_widget.setLayout(self._contents_layout)
         self.setWidget(contents_widget)
 

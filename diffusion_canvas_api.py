@@ -12,6 +12,7 @@
 
 import math
 import PIL.Image
+import numpy as np
 import torch
 import utils.texture_convert as conv
 from brushes import Brushes
@@ -142,7 +143,8 @@ class DiffusionCanvasAPI:
     class BlendMode(Enum):
         Blend = 0
         Add = 1
-        Merge = 2
+        ReplaceColor = 2
+        ReplaceDetail = 3
 
     def __init__(self):
         self._brushes = Brushes()
@@ -334,7 +336,7 @@ class DiffusionCanvasAPI:
         if blend_mode == DiffusionCanvasAPI.BlendMode.Add:
             return source * alpha + destination
 
-        elif blend_mode == DiffusionCanvasAPI.BlendMode.Merge:
+        elif blend_mode == DiffusionCanvasAPI.BlendMode.ReplaceColor:
             source_avg = DiffusionCanvasAPI.get_average_latent_masked(source, alpha)
             dest_avg = DiffusionCanvasAPI.get_average_latent_masked(destination, alpha)
             difference = tuple(v - a for v, a in zip(source_avg, dest_avg))
@@ -344,6 +346,24 @@ class DiffusionCanvasAPI:
                 destination.dtype,
                 destination.device)
             return solid * alpha + destination
+
+        elif blend_mode == DiffusionCanvasAPI.BlendMode.ReplaceDetail:
+            source_avg = DiffusionCanvasAPI.get_average_latent_masked(source, alpha)
+            dest_avg = DiffusionCanvasAPI.get_average_latent_masked(destination, alpha)
+            source_avg = DiffusionCanvasAPI.create_solid_latent(
+                source_avg,
+                destination.shape,
+                destination.dtype,
+                destination.device)
+            dest_avg = DiffusionCanvasAPI.create_solid_latent(
+                dest_avg,
+                destination.shape,
+                destination.dtype,
+                destination.device)
+            source_detail = source - source_avg
+            dest_detail = destination - dest_avg
+
+            return (source_detail - dest_detail) * alpha + destination
 
         else:
             return source * alpha + destination * (1-alpha)
@@ -701,7 +721,7 @@ class DiffusionCanvasAPI:
             (latent_x, latent_y_flipped),
             draw_latent_radius,
             (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
-            opacity=1,
+            opacity=abs(opacity),
             mode="blend"
         ).to(shared.device)
 
@@ -713,13 +733,13 @@ class DiffusionCanvasAPI:
                 (latent_x, latent_y_flipped),
                 noise_latent_radius,
                 (1, 1, 1, 1),  # The Y, Z, and W components are ignored.
-                opacity=opacity,
+                opacity=abs(opacity),
                 mode="blend"
             ).to(shared.device)
 
         # 1. Apply the blend procedure to the affected area,
         #    and get the amplitude of difference introduced by the change.
-        blended = self._get_blended(source_tensor, layer.clean_latent, paint_mask, blend_mode)
+        blended = self._get_blended(source_tensor, layer.clean_latent, paint_mask * np.sign(opacity), blend_mode)
 
         #    1.a. Calculate the amplitude of the change from the old to the new.
         difference = layer.clean_latent - blended

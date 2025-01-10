@@ -339,6 +339,9 @@ class History:
         # Add a clone of the current state we can switch back to, AND the active state.
         self._undo_stack += [History._Item(current_item.layer.clone(), description, thumbnail), current_item]
 
+        current_item.thumbnail = None
+        current_item.description = "Current canvas"
+
         self._undo_index = len(self._undo_stack) - 1
 
     def _clamp_undo_index(self, index: int):

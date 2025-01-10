@@ -266,7 +266,7 @@ class LabelImageButton(QPushButton):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        layout = QFormLayout(self)
+        layout = QHBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self.setLayout(layout)
 
@@ -276,7 +276,8 @@ class LabelImageButton(QPushButton):
         self._image_label = QLabel()
         self._image_label.setScaledContents(True)
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
-        layout.addRow(self._text_label, self._image_label)
+        layout.addWidget(self._text_label)
+        layout.addWidget(self._image_label)
 
     def set_image(self, pixmap: QPixmap | None):
         if pixmap is None:  # It should accept none, but it doesn't?
