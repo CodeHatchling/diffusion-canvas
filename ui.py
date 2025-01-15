@@ -1,4 +1,5 @@
 # This script: ui.py - UI for DiffusionCanvas.
+import builtins
 
 # Overview of all scripts in project:
 # scripts/diffusion_canvas.py - Script that interfaces with sd.webui and is the entry point for launch.
@@ -43,6 +44,7 @@ from ui_canvas import Canvas
 from ui_latent_picker import LatentPicker, HistoryPickerWidget
 
 from common import *
+import latent_file
 
 
 class DiffusionCanvasWindow(QMainWindow):
@@ -366,19 +368,38 @@ class DiffusionCanvasWindow(QMainWindow):
         Opens a file open dialogue. If a file is opened, replaces the layer with the image.
         """
         with ExceptionCatcher(self, "Failed to load image"):
-            file_path, _ = QFileDialog.getOpenFileName(self, "Open Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+            supported_extensions = Image.registered_extensions()
+            supported_extensions = [ex for ex, f in supported_extensions.items() if f in Image.OPEN]
+
+            supported_extensions_str = [f"*{ex}" for ex in supported_extensions]
+            supported_extensions_str = " ".join(supported_extensions_str)
+
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "Open Image", "",
+                f"Image Files ({supported_extensions_str});;Latent Files (*.lat)")
 
             if not file_path:
                 return  # User canceled
 
-            # Load the image and convert to a diffusion canvas layer
-            image = Image.open(file_path)
-            layer = self.api.create_layer_from_image_tiled(
-                image,
-                max_tile_size_latents=64,
-                margin_size_latents=4,
-                overlap_size_latents=8
-            )
+            try:
+                file_type = file_path[file_path.rindex('.'):]
+            except ValueError:
+                raise Exception(f"The provided file {file_path} did not have a recognizable extension.")
+
+            if file_type in supported_extensions:
+                # Load the image and convert to a diffusion canvas layer
+                image = Image.open(file_path)
+                layer = self.api.create_layer_from_image_tiled(
+                    image,
+                    max_tile_size_latents=64,
+                    margin_size_latents=4,
+                    overlap_size_latents=8
+                )
+            elif file_type == '.lat':
+                tensor = latent_file.read_tensor(file_path)
+                layer = self.api.create_layer_from_tensor(tensor)
+            else:
+                raise Exception(f"The provided file type {file_type} is not supported.")
 
             self.initialize_canvas(layer)
 
@@ -387,23 +408,41 @@ class DiffusionCanvasWindow(QMainWindow):
         Opens a file save dialogue. If a destination file is chosen, saves the canvas to that file.
         """
         with ExceptionCatcher(self, "Failed to save image"):
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp)")
+            supported_extensions = Image.registered_extensions()
+            supported_extensions = [ex for ex, f in supported_extensions.items() if f in Image.OPEN]
+
+            supported_extensions_str = [f"*{ex}" for ex in supported_extensions]
+            supported_extensions_str = " ".join(supported_extensions_str)
+
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Save Image", "",
+                f"Image Files ({supported_extensions_str});;Latent Files (*.lat)")
 
             if not file_path:
                 return  # User canceled
 
-            # Convert the latent space image back to a PIL image
-            image = self.api.latent_to_image_tiled(
-                latent=self.layer.clean_latent,
-                max_tile_size_latents=64,
-                margin_size_latents=4,
-                overlap_size_latents=8,
-                full_quality=True,
-                dest_type=PIL.Image.Image
-            )
+            try:
+                file_type = file_path[file_path.rindex('.'):]
+            except ValueError:
+                raise Exception(f"The provided file {file_path} did not have a recognizable extension.")
 
-            # Save the image to the chosen file path
-            image.save(file_path)
+            if file_type in supported_extensions:
+                # Convert the latent space image back to a PIL image
+                image = self.api.latent_to_image_tiled(
+                    latent=self.layer.clean_latent,
+                    max_tile_size_latents=64,
+                    margin_size_latents=4,
+                    overlap_size_latents=8,
+                    full_quality=True,
+                    dest_type=PIL.Image.Image
+                )
+
+                # Save the image to the chosen file path
+                image.save(file_path)
+            elif file_type == '.lat':
+                latent_file.write_tensor(file_path, self.layer.clean_latent)
+            else:
+                raise Exception(f"The provided file type {file_type} is not supported.")
 
             QMessageBox.information(self, "Save Successful", f"Image saved to {file_path}")
 

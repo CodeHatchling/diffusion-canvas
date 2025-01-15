@@ -152,6 +152,20 @@ class DiffusionCanvasAPI:
 
     @staticmethod
     @torch.no_grad()
+    def create_layer_from_tensor(tensor: torch.Tensor) -> Layer:
+        tensor = tensor.to(shared.device)
+        noise_amp_shape = list(tensor.shape)
+        noise_amp_shape[1] = 1
+        noise_amp_shape = tuple(noise_amp_shape)
+        noise_amplitude = torch.zeros(noise_amp_shape, dtype=tensor.dtype, device=tensor.device)
+        return Layer(
+            tensor,
+            tensor.clone(),
+            noise_amplitude
+        )
+
+    @staticmethod
+    @torch.no_grad()
     def create_layer_from_image(image: PIL.Image.Image) -> Layer:
         image = _center_crop_for_sd(image, latent_size_in_pixels).convert(mode="RGB")
         image_tensor = conv.convert(image, torch.Tensor).to(shared.device)
