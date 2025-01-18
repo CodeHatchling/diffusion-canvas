@@ -53,7 +53,7 @@ def decode_image(latent, full_quality: bool = True):
         image = processing.decode_latent_batch(shared.sd_model, latent)
         image = torch.stack(image).float()
     else:
-        image = samples_to_images_tensor(latent, approximation_indexes.get(opts.show_progress_type, 0))
+        image = samples_to_images_tensor(latent, approximation=3)
 
     return torch.clamp((image + 1.0) / 2.0, min=0.0, max=1.0)
 
