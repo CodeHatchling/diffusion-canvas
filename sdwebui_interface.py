@@ -17,10 +17,8 @@ import modules.scripts as scripts
 from modules.sd_samplers_common import (
     images_tensor_to_samples,
     samples_to_images_tensor,
-    approximation_indexes,
     InterruptedException
 )
-from modules.shared import opts
 from modules import devices
 from modules.script_callbacks import BeforeDenoiserForwardParams
 
