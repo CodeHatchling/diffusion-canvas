@@ -64,7 +64,7 @@ def encode_image(image):
 
 
 @torch.no_grad()
-def denoise(denoiser: any, latent: torch.Tensor, sigma: float, params: any) -> torch.Tensor:
+def denoise(denoiser: any, latent: torch.Tensor, sigma: float, cfg_scale: float, params: any) -> torch.Tensor:
     with Timer("denoise"):
         if denoiser is None:
             return latent
@@ -77,7 +77,7 @@ def denoise(denoiser: any, latent: torch.Tensor, sigma: float, params: any) -> t
 
         with Timer("denoiser.forward"), torch.no_grad():
             dtype = latent.dtype
-            latent = denoiser.forward(latent, params.sigma, params.uncond, params.cond, params.cond_scale, params.s_min_uncond,
+            latent = denoiser.forward(latent, params.sigma, params.uncond, params.cond, cfg_scale, params.s_min_uncond,
                                     params.image_cond).to(dtype)
 
         our_call = False

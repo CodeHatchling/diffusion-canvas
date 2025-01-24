@@ -153,6 +153,14 @@ class NoiseBrushTool(BaseBrushTool):
             (0.0, 1.0),
             0.001
         )
+
+        self.slider_cfg_scale = Slider(
+            "CFG Scale",
+            7,
+            (1, 30.0),
+            0.5
+        )
+
         self.slider_denoise_bias = Slider(
             "Denoise Bias",
             0,
@@ -167,6 +175,7 @@ class NoiseBrushTool(BaseBrushTool):
         _add_slider(sliders_layout, self.slider_denoise_size_y)
         _add_slider(sliders_layout, self.slider_denoise_attenuation)
         _add_slider(sliders_layout, self.slider_denoise_subtraction)
+        _add_slider(sliders_layout, self.slider_cfg_scale)
         _add_slider(sliders_layout, self.slider_denoise_bias)
 
         return sliders_widget
@@ -198,6 +207,10 @@ class NoiseBrushTool(BaseBrushTool):
     def _get_denoise_subtraction(self):
         return self.slider_denoise_subtraction.value
     denoise_subtraction = property(_get_denoise_subtraction)
+
+    def _get_cfg_scale(self):
+        return self.slider_cfg_scale.value
+    cfg_scale = property(_get_cfg_scale)
 
     def _get_denoise_bias(self):
         return self.slider_denoise_bias.value
@@ -251,6 +264,7 @@ class NoiseBrushTool(BaseBrushTool):
                    self.denoise_context_size_y
                 ),
                 attenuation_params=(self.denoise_attenuation, self.denoise_subtraction),
+                cfg_scale=self.cfg_scale,
                 noise_bias=2 ** self.denoise_bias,
                 time_budget=0.1
             )
@@ -443,6 +457,14 @@ class ShiftBrushTool(BaseBrushTool):
             (1, 10),
             1
         )
+
+        self.slider_cfg_scale = Slider(
+            "CFG Scale",
+            7,
+            (1.0, 30.0),
+            0.5
+        )
+
         self.slider_denoise_bias = Slider(
             "Denoise Bias",
             0,
@@ -507,6 +529,7 @@ class ShiftBrushTool(BaseBrushTool):
         self._add_slider(self._color_shift_mode_widgets, self.slider_denoise_size_x)
         self._add_slider(self._color_shift_mode_widgets, self.slider_denoise_size_y)
         self._add_slider(self._color_shift_mode_widgets, self.slider_denoise_steps)
+        self._add_slider(self._color_shift_mode_widgets, self.slider_cfg_scale)
         self._add_slider(self._color_shift_mode_widgets, self.slider_denoise_bias)
 
         ## Create the shift mode list.
@@ -523,6 +546,7 @@ class ShiftBrushTool(BaseBrushTool):
         self._add_slider(self._shift_mode_widgets, self.slider_denoise_size_x)
         self._add_slider(self._shift_mode_widgets, self.slider_denoise_size_y)
         self._add_slider(self._shift_mode_widgets, self.slider_denoise_steps)
+        self._add_slider(self._shift_mode_widgets, self.slider_cfg_scale)
         self._add_slider(self._shift_mode_widgets, self.slider_denoise_bias)
 
         self._populate_dock_layout()
@@ -596,6 +620,10 @@ class ShiftBrushTool(BaseBrushTool):
         return int(self.slider_denoise_steps.value)
     denoise_steps = property(_get_denoise_steps)
 
+    def _get_cfg_scale(self):
+        return self.slider_cfg_scale.value
+    cfg_scale = property(_get_cfg_scale)
+
     def _get_denoise_bias(self):
         return self.slider_denoise_bias.value
     denoise_bias = property(_get_denoise_bias)
@@ -630,6 +658,7 @@ class ShiftBrushTool(BaseBrushTool):
                     opacity=self.brush_opacity,
                     noise_pixel_radius=self.brush_radius * self.noise_radius_scale,
                     noise_scale=self.noise_scale,
+                    cfg_scale=self.cfg_scale,
                     noise_bias=2 ** self.denoise_bias,
                     context_region_pixel_size_xy=(
                         self.denoise_size_x,
@@ -662,6 +691,7 @@ class ShiftBrushTool(BaseBrushTool):
                     position_xy=normalized_mouse_coord,
                     pixel_radius=self.brush_radius,
                     noise_intensity=self.noise_intensity,
+                    cfg_scale=self.cfg_scale,
                     noise_bias=2 ** self.denoise_bias,
                     context_region_pixel_size_xy=(
                         self.denoise_size_x,

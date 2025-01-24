@@ -27,7 +27,7 @@ class EditParamsDialog(QDialog):
 
     def __init__(self,
                  current_widget: "ParamsWidget",
-                 generate_handler: Callable[[int, int, int, any], torch.Tensor] | None,
+                 generate_handler: Callable[[int, int, int, float, any], torch.Tensor] | None,
                  parent=None):
         super().__init__(parent)
         self.setWindowTitle("Edit Params")
@@ -76,7 +76,7 @@ class EditParamsDialog(QDialog):
                 return
 
             import utils.texture_convert as conv
-            image = conv.convert(self.generate_handler(512, 512, 20, params), QImage)
+            image = conv.convert(self.generate_handler(512, 512, 20, 7, params), QImage)
             image = QPixmap.fromImage(image)
             self.image.setPixmap(image)
 
@@ -99,7 +99,7 @@ class ParamsWidget(QWidget):
                  button_name: str,
                  params_setter: Callable[[any], None],
                  delete_handler: Callable[['ParamsWidget'], None],
-                 generate_handler: Callable[[int, int, int, any], torch.Tensor] | None,
+                 generate_handler: Callable[[int, int, int, float, any], torch.Tensor] | None,
                  parent: QWidget | None = None,):
         super().__init__(parent)
         self.params = params

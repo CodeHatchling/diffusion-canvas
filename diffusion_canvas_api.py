@@ -308,7 +308,7 @@ class DiffusionCanvasAPI:
         self._denoiser = denoiser
 
     @torch.no_grad()
-    def generate_image(self, width: int, height: int, steps: int, params: any) -> torch.Tensor:
+    def generate_image(self, width: int, height: int, steps: int, cfg_scale: float, params: any) -> torch.Tensor:
         width = int(np.maximum(1, np.ceil(width / latent_size_in_pixels)))
         height = int(np.maximum(1, np.ceil(height / latent_size_in_pixels)))
 
@@ -319,7 +319,7 @@ class DiffusionCanvasAPI:
 
         for i in range(steps):
             sigma_to_remove = (i+1) / steps
-            denoised = denoise(denoiser=self._denoiser, latent=latent, sigma=sigma, params=params)
+            denoised = denoise(denoiser=self._denoiser, latent=latent, sigma=sigma, cfg_scale=cfg_scale, params=params)
 
             if i+1 == steps:
                 latent = denoised
@@ -543,6 +543,7 @@ class DiffusionCanvasAPI:
                          pixel_radius: float,
                          context_region_pixel_size_xy: tuple[int, int],
                          attenuation_params: tuple[float, float],
+                         cfg_scale: float,
                          noise_bias: float,
                          time_budget: float = 0.25) -> Bounds2D | None:
 
@@ -578,7 +579,7 @@ class DiffusionCanvasAPI:
         ).to(shared.device)
 
         for _ in TimeBudget(time_budget):
-            layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
+            layer.step(lambda x, y: denoise(self._denoiser, x, y, cfg_scale, params),
                        lambda x: np.maximum(x * (1.0 - attenuation_params[0])
                                             - attenuation_params[1], 0),
                        brush_mask=mask,
@@ -603,6 +604,7 @@ class DiffusionCanvasAPI:
                        position_xy: tuple[float, float],
                        pixel_radius: float,
                        noise_intensity: float,
+                       cfg_scale: float,
                        noise_bias: float,
                        context_region_pixel_size_xy: tuple[int, int],
                        denoise_steps: int) -> Bounds2D | None:
@@ -666,7 +668,7 @@ class DiffusionCanvasAPI:
             if math.isnan(attenuation) or math.isinf(attenuation):
                 attenuation = 0
 
-            layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
+            layer.step(lambda x, y: denoise(self._denoiser, x, y, cfg_scale, params),
                        lambda x: x * attenuation,
                        brush_mask=None,
                        noise_bias=noise_bias,
@@ -689,6 +691,7 @@ class DiffusionCanvasAPI:
                              opacity: float,
                              noise_pixel_radius: float,
                              noise_scale: float,
+                             cfg_scale: float,
                              noise_bias: float,
                              context_region_pixel_size_xy: tuple[int, int],
                              denoise_steps: int) -> Bounds2D | None:
@@ -799,7 +802,7 @@ class DiffusionCanvasAPI:
             if math.isnan(attenuation) or math.isinf(attenuation):
                 attenuation = 0
 
-            layer.step(lambda x, y: denoise(self._denoiser, x, y, params),
+            layer.step(lambda x, y: denoise(self._denoiser, x, y, cfg_scale, params),
                        lambda x: x * attenuation,
                        brush_mask=None,
                        noise_bias=noise_bias,
