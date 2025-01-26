@@ -56,15 +56,15 @@ CREDIT:
 PLANNED FEATURES/FIXES:
 
 - Textured Brushes:
-  - History/undo brush. Instead of a solid color, provide a previous version of the image as content to paint in.
+  - ✅ History/undo brush. Instead of a solid color, provide a previous version of the image as content to paint in.
   - Clone/stamp brush. The last undo state is used as a source, but is painted with an offset.
   - Texture brush. Upload an image that can be used as a source, options for tiling and random offsets.
   - Custom: Any combination of the above features; source latents, offset, tiling, etc.
   - Deghosting. When painting in a texture, the transition zones are noised and denoised.
-- CFG Scale slider.
+- ✅ CFG Scale slider.
 - A "denoise all" checkbox for the noise/denoise brush. (Work-around: enter a large value like 99999.)
 - ✅ Pages for color swatches. Currently they all pile up under the color picker without limit. 
 - Branched undo history.
-- Save/load encoded latent data. This can be used to avoid the loss that decoding and encoding causes.
+- ✅ Save/load encoded latent data. This can be used to avoid the loss that decoding and encoding causes.
 - Save/load params palette.
 - Generate on the main (sd.webui) thread instead of the UI thread.
